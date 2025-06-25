@@ -74,32 +74,11 @@ func Save(object interface{}, path string) error {
 }
 
 func ReadFile(path string) ([]byte, error) {
-
-	fi, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("error opening file in ReadFile")
+		return nil, fmt.Errorf("error reading file: %w", err)
 	}
-	// close fi on exit and check for its returned error
-	defer func() {
-		if err := fi.Close(); err != nil {
-			fmt.Println(err)
-			panic(err)
-		}
-	}()
-
-	buf := make([]byte, 1024)
-
-	bytesRead, err := fi.Read(buf)
-
-	if err != nil {
-
-		fmt.Println("error reading file")
-		return nil, fmt.Errorf("error reading file")
-
-	}
-
-	return buf[0:bytesRead], nil
-
+	return data, nil
 }
 func GetJWKS() (*psso.JWKS, error) {
 	if _, err := os.Stat(constants.JWKSFilepath); errors.Is(err, os.ErrNotExist) {
