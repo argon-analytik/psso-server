@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/twocanoes/psso-server/pkg/constants"
-	"github.com/twocanoes/psso-server/pkg/handlers"
+	"github.com/argon-analytik/psso-server/pkg/constants"
+	"github.com/argon-analytik/psso-server/pkg/handlers"
 )
 
 func NewRouter() *http.ServeMux {

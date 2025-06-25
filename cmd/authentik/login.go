@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/twocanoes/psso-server/pkg/constants"
+	"github.com/argon-analytik/psso-server/pkg/constants"
 )
 
 // tokenResponse represents a minimal subset of Authentik's token endpoint response.

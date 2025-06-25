@@ -1,4 +1,4 @@
-module github.com/twocanoes/psso-server
+module github.com/argon-analytik/psso-server
 
 go 1.22
 

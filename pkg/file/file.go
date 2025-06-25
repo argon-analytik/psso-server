@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/argon-analytik/psso-server/pkg/constants"
 	"github.com/twocanoes/psso-sdk-go/psso"
-	"github.com/twocanoes/psso-server/pkg/constants"
 )
 
 type Device struct {

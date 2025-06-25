@@ -12,11 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/argon-analytik/psso-server/cmd/authentik"
+	"github.com/argon-analytik/psso-server/pkg/constants"
+	"github.com/argon-analytik/psso-server/pkg/file"
 	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/twocanoes/psso-sdk-go/psso"
-	"github.com/twocanoes/psso-server/cmd/authentik"
-	"github.com/twocanoes/psso-server/pkg/constants"
-	"github.com/twocanoes/psso-server/pkg/file"
 )
 
 func jwksPrivateKey() (*ecdsa.PrivateKey, error) {

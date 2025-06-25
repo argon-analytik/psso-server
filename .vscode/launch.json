@@ -12,7 +12,7 @@
             "mode": "auto",
             "program": "${workspaceFolder}/cmd/local/main.go",
             "env": {
-                "PSSO_ISSUER":"idp.twocanoes.com",
+                "PSSO_ISSUER":"auth.argio.ch",
                 "PSSO_ADDRESS":":6443"
                 "JWKSFilepath": "c:\\psso\\jwks.json",
                 "TLSPrivateKeyPath": "c:\\certs\\privkey.pem",
