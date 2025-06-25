@@ -16,7 +16,7 @@ compose network and is exposed publicly via a **Cloudflare Tunnel** as
 
 ---
 
-## Directory layout
+# Directory layout
 ```
 .
 ├── cmd/
@@ -29,7 +29,7 @@ compose network and is exposed publicly via a **Cloudflare Tunnel** as
 
 ---
 
-## Prerequisites
+# Prerequisites
 
 | Tool | Version | Comment |
 |------|---------|---------|
@@ -40,7 +40,7 @@ compose network and is exposed publicly via a **Cloudflare Tunnel** as
 
 ---
 
-## 1  Quick Start (“I just want it running”)
+# 1  Quick Start (“I just want it running”)
 
 ```bash
 # clone your fork on the NAS
@@ -64,7 +64,7 @@ receive JSON (no TLS warning), the tunnel is active.
 
 ---
 
-## 2  Important ENV Variables
+# 2  Important ENV Variables
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
@@ -82,7 +82,7 @@ Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
 
 ---
 
-## 3  Integrate with the macOS Profile
+# 3  Integrate with the macOS Profile
 
 1. Build & notarize the **Argio SSO** extension (see that repo’s README).  
 2. Import `deployment/argio_PSSO.mobileconfig` into Mosyle.  
@@ -92,7 +92,7 @@ Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
 
 ---
 
-## 4  Common Troubleshooting
+# 4  Common Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
@@ -102,7 +102,7 @@ Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
 
 ---
 
-## 5  Next Steps / Ideas
+# 5  Next Steps / Ideas
 
 * Switch `AuthenticationMethod` to **Key** for password‑less login  
 * Add **SCIM** sync so Authentik auto‑creates Managed Apple IDs in ABM  
@@ -110,11 +110,8 @@ Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
 
 ---
 
-## Contribution / License
+# Contribution / License
 
 Code is MIT‑licensed (same as upstream Twocanoes).  
 Feel free to open PRs or issues in the [Argon‑Analytik](https://github.com/argon-analytik) org.
 PRs should pass `go vet` and the basic health‑check compose test.
-
-Happy cloud logins! 🚀
-```
