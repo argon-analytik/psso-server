@@ -12,9 +12,9 @@ import (
 	"github.com/twocanoes/psso-server/pkg/constants"
 )
 
-// VerifyCredentials contacts the Authentik token endpoint using the Password
+// VerifyAndFetchRoles contacts the Authentik token endpoint using the Password
 // grant. It returns the roles derived from the user's groups.
-func VerifyCredentials(username, password string) ([]string, error) {
+func VerifyAndFetchRoles(username, password string) ([]string, error) {
 	if constants.AuthentikTokenEndpoint == "" ||
 		constants.AuthentikClientID == "" ||
 		constants.AuthentikClientSecret == "" {

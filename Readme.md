@@ -20,7 +20,7 @@ compose network and is exposed publicly via a **Cloudflare Tunnel** as
 ```
 .
 ├── cmd/
-│   └── authentik/               # VerifyCredentials implementation
+│   └── authentik/               # Authentik integrations
 ├── docker-compose.override.yml  # psso + cloudflared overlay
 ├── Dockerfile                   # builds the psso-server binary
 ├── .env.psso                    # example env‑file (edit & copy!)

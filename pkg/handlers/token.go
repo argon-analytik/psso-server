@@ -174,7 +174,7 @@ func Token() http.HandlerFunc {
 			claimUsername := userClaims.Username
 			claimPassword := userClaims.Password
 
-			roles, err := authentik.VerifyCredentials(claimUsername, claimPassword)
+			roles, err := authentik.VerifyAndFetchRoles(claimUsername, claimPassword)
 			if err != nil {
 				fmt.Println("invalid username or password")
 				return
