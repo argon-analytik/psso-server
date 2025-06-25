@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/twocanoes/psso-sdk-go/psso"
+	"github.com/twocanoes/psso-server/cmd/authentik"
 	"github.com/twocanoes/psso-server/pkg/constants"
 	"github.com/twocanoes/psso-server/pkg/file"
 )
@@ -169,37 +171,20 @@ func Token() http.HandlerFunc {
 				fmt.Println(err)
 				return
 			}
-			//get the username and password sent in thte request
 			claimUsername := userClaims.Username
 			claimPassword := userClaims.Password
 
-			// compare with what is passed in
-			if claimUsername == "jappleseed@twocanoes.com" {
-
-				jweString, err = psso.CreateIDTokenResponse(constants.Issuer, *userClaims, "johnny", "Johnny Appleseed", []string{"admin", "net-admin", "software-install"}, "jappleseed@twocanoes.com", "jappleseed@twocanoes.com", "refresh", servicePrivateKey, jwks.KID, deviceEncryptionPublicKey.(*ecdsa.PublicKey))
-				if err != nil {
-					fmt.Println("invalid jwe")
-					return
-				}
-
-			} else if claimUsername == "liz@twocanoes.com" && claimPassword == "twocanoes" {
-
-				jweString, err = psso.CreateIDTokenResponse(constants.Issuer, *userClaims, "Liz", "Liz Appleseed", []string{"software-install", "psso-standard-users"}, "liz@twocanoes.com", "liz@twocanoes.com", "refresh", servicePrivateKey, jwks.KID, deviceEncryptionPublicKey.(*ecdsa.PublicKey))
-				if err != nil {
-					fmt.Println("invalid jwe")
-					return
-				}
-
-			} else if claimUsername == "nate@twocanoes.com" && claimPassword == "twocanoes" {
-
-				jweString, err = psso.CreateIDTokenResponse(constants.Issuer, *userClaims, "Nate", "Nate Appleseed", []string{"software-install", "psso-standard-users"}, "nate@twocanoes.com", "nate@twocanoes.com", "refresh", servicePrivateKey, jwks.KID, deviceEncryptionPublicKey.(*ecdsa.PublicKey))
-				if err != nil {
-					fmt.Println("invalid jwe")
-					return
-				}
-
-			} else {
+			roles, err := authentik.VerifyCredentials(claimUsername, claimPassword)
+			if err != nil {
 				fmt.Println("invalid username or password")
+				return
+			}
+			shortName := strings.Split(claimUsername, "@")[0]
+			fullName := shortName
+
+			jweString, err = psso.CreateIDTokenResponse(constants.Issuer, *userClaims, shortName, fullName, roles, claimUsername, claimUsername, "refresh", servicePrivateKey, jwks.KID, deviceEncryptionPublicKey.(*ecdsa.PublicKey))
+			if err != nil {
+				fmt.Println("invalid jwe")
 				return
 			}
 
