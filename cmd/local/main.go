@@ -7,11 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
-	"github.com/twocanoes/psso-sdk-go/psso"
-	"github.com/twocanoes/psso-server/cmd/authentik"
 	"github.com/twocanoes/psso-server/pkg/constants"
 	"github.com/twocanoes/psso-server/pkg/handlers"
 )
@@ -113,9 +110,6 @@ func main() {
 	log.Printf("Admin groups: %v", constants.AdminGroups)
 
 	handlers.CheckWellKnowns()
-
-	psso.RegisterCredentialVerifier(authentik.VerifyCredentials)
-	psso.SetAdminGroups(strings.Split(constants.AdminGroups, ","))
 
 	run()
 
