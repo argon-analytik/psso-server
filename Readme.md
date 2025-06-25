@@ -57,6 +57,10 @@ docker compose -f ../authentik/docker-compose.yml \
 
 # check health endpoint
 curl -vk http://localhost:9100/healthz   # → "ok"
+
+# inspect well-known endpoints
+curl -vk http://localhost:9100/.well-known/jwks.json                 # → HTTP/200 & JSON
+curl -vk http://localhost:9100/.well-known/apple-app-site-association # → HTTP/200 & JSON
 ```
 
 If you visit <https://psso.argio.ch/.well-known/jwks.json> in a browser and
