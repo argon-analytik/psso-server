@@ -179,7 +179,7 @@ func Register() http.HandlerFunc {
 		}
 		filename = hex.EncodeToString(decodedEncryptionKeyID) + ".json"
 
-		err = file.Save(newEncKey, filepath.Join(constants.KeyPath, filename+".json"))
+		err = file.Save(newEncKey, filepath.Join(constants.KeyPath, filename))
 
 		if err != nil {
 			fmt.Println(err.Error())
