@@ -1,0 +1,22 @@
+version: '3.9'
+services:
+  psso:
+    build: .
+    env_file:
+      - .env.psso
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+    networks:
+      - tunnel
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    networks:
+      - tunnel
+networks:
+  tunnel:
+    name: psso_tunnel
