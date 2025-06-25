@@ -47,7 +47,11 @@ func Nonce() http.HandlerFunc {
 			fmt.Println(err)
 			return
 		}
-		json, _ := json.Marshal(response)
-		w.Write(json)
+		payload, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+			return
+		}
+		w.Write(payload)
 	}
 }
