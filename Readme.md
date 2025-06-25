@@ -1,173 +1,120 @@
-# psso-server-go
+# Argio Platform SSO Server (`psso-server`)
 
-Welcome to psso-server-go. It is a basic implementation of the Platform Single Sign on protocol. The protocol implementation is handed by psso-pkg-go.  psso-server-go calls implement the user and session management, groups, and web-specific calls. The package handles the cryptography, JWT, and other protocol-specific features.  
+A lightweight Go service that implements Apple’s **Platform Single Sign‑On (PSSO)**
+protocol and delegates all credential checks to your **Authentik** IdP
+(`https://auth.argio.ch`).  
+When combined with the *Argio SSO* macOS/iOS extension, it allows users to:
 
-## PSSO
-PSSO is a feature of macOS for cloud binding. It provides a mechanism for 
-To learn more about Platform SSO (PSSO), please visit https://twocanoes.com/sso.
+* log in **directly at the macOS login window** with their Authentik account  
+* receive just‑in‑time local accounts & group mappings  
+* unlock the Mac with the same cloud password (Touch ID / Face ID supported)  
+* enjoy seamless SSO in Safari & native apps once the desktop appears
 
-## Running
-psso-server-go should be able to be deployed on macOS, Windows, and Linux. PSSO requires that the service use TLS with a public SSL certificate (Let's Encrypt works fine). The basic steps are:
+The server runs in Docker on your Synology NAS, listens on **:9100** inside the
+compose network and is exposed publicly via a **Cloudflare Tunnel** as  
+`https://psso.argio.ch`.
 
-1. Install Go (https://golang.com) and Git (xcode-select --install on macOS) on your target platform
+---
 
-2. Register a DNS name and get a certificate from a well known authority. Make sure the private key and certificate are in PEM format and are not password protected. Copy the private key to /etc/psso/privkey.pem and the certificate chain to /etc/psso/fullchain.pem. The server certificate should listed first and the root certificate in the chain listed last in the fullchain.pem.
-3. Clone the repo to the target machine:
-
-	`git clone https://github.com/twocanoes/psso-server-go`
-			
-4. Run go mod tidy to get the required packages:
-			
-	`go mod tidy`
-
-5. Run the app. The defaults assume a folder writeable by the app /var/psso. The defaults are set for macOS and Linux and should be modified as outlined in the Modifying Defaults section. Set the PSSO\_ISSUER to the hostname of the service. It must match the Issuer in the configuration profile below.
-
-	```xml
-	sudo -s
-	PSSO_ISSUER=idp.example.com go run cmd/local/main.go
-	```
-
-6. If the hostname is not accessible via DNS on the client, add the hostname and the IP address to the /etc/hosts file, replacing idp.example.com with the hostname of the PSSO server.
-
-`sudo -s`
-```xml
-echo "192.168.1.100 idp.example.com" >> /etc/hosts
+## Directory layout
+```
+.
+├── cmd/
+│   └── authentik/               # VerifyCredentials implementation
+├── docker-compose.override.yml  # psso + cloudflared overlay
+├── Dockerfile                   # builds the psso-server binary
+├── .env.psso                    # example env‑file (edit & copy!)
+└── README.md                    # this file
 ```
 
-6. On the client, verify these endpoints are accessible (replace idp.example.com with your hostname) and do not have any SSL errors.
-https://idp.example.com/.well-known/apple-app-site-association
-https://idp.example.com/.well-known/jwks.json
-		
-6. Install Scissors test app from:
+---
 
-> https://github.com/twocanoes/psso-server-go/releases
-		
-6. Create a configuration profile and SSOE app in macOS to use this service. Replace the following key/values:
+## Prerequisites
 
-* AccountDisplayName: name of the Identity Provider that will show in dialogs. For example, "My Identity Provider".
-* BaseURL: The URL of the service. For example, https://idp.example.com.
-* Issuer: the hostname. It must match the issuer when running. For example, idp.example.com.
- 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">~
-<dict>
-<key>PayloadContent</key>
-<array>
-	<dict>
-		<key>AuthenticationMethod</key>
-		<string>Password</string>
-		<key>ExtensionIdentifier</key>
-		<string>com.twocanoes.Scissors.ssoe</string>
-		<key>PayloadDisplayName</key>
-		<string>Single Sign-On Extensions Scissors</string>
-		<key>PayloadIdentifier</key>
-		<string>com.apple.extensiblesso.CA351D35-96B1-41CF-B25B-DF3273189AAD</string>
-		<key>PayloadOrganization</key>
-		<string></string>
-		<key>PayloadType</key>
-		<string>com.apple.extensiblesso</string>
-		<key>PayloadUUID</key>
-		<string>4B7148CD-1069-4140-95CE-78F61BCD9C2B</string>
-		<key>PayloadVersion</key>
-		<integer>1</integer>
-		<key>PlatformSSO</key>
-		<dict>
-			<key>AccountDisplayName</key>
-			<string>My Identity Provider</string>
-			<key>AuthenticationMethod</key>
-			<string>Password</string>
-			<key>EnableAuthorization</key>
-			<true/>
-			<key>EnableCreateUserAtLogin</key>
-			<true/>
-			<key>NewUserAuthorizationMode</key>
-			<string>Groups</string>
-			<key>UseSharedDeviceKeys</key>
-			<true/>
-			<key>UserAuthorizationMode</key>
-			<string>Groups</string>
-		</dict>
-		<key>TeamIdentifier</key>
-		<string>UXP6YEHSPW</string>
-		<key>Type</key>
-		<string>Redirect</string>
-	</dict>
-	<dict>
-		<key>BaseURL</key>
-		<string>https://idp.example.com/</string>
-		<key>Issuer</key>
-		<string>idp.example.com</string>
-		<key>Audience</key>
-		<string>idp-audience</string>
-		<key>ClientID</key>
-		<string>idp-clientid</string>
-		<key>PayloadDisplayName</key>
-		<string>Scissors SSOE</string>
-		<key>PayloadIdentifier</key>
-		<string>mdscentral.00A38C42-503B-4016-A86D-2186CDA5989C.com.twocanoes.xcreds.3E7FAF27-6179-46AA-B1A3-B55E08D3273D</string>
-		<key>PayloadOrganization</key>
-		<string></string>
-		<key>PayloadType</key>
-		<string>com.twocanoes.Scissors.ssoe</string>
-		<key>PayloadUUID</key>
-		<string>3E7FAF27-6179-46AA-B1A3-B55E08D3273D</string>
-		<key>PayloadVersion</key>
-		<integer>1</integer>
-	</dict>
-</array>
-<key>PayloadDisplayName</key>
-<string>PSSO</string>
-<key>PayloadIdentifier</key>
-<string>mdscentral.00A38C42-503B-4016-A86D-2186CDA5989C</string>
-<key>PayloadOrganization</key>
-<string></string>
-<key>PayloadScope</key>
-<string>System</string>
-<key>PayloadType</key>
-<string>Configuration</string>
-<key>PayloadUUID</key>
-<string>851A1B56-6A8A-442B-91CB-BC12FF416766</string>
-<key>PayloadVersion</key>
-<integer>1</integer>
-</dict>
-</plist>
+| Tool | Version | Comment |
+|------|---------|---------|
+| Docker / Docker Compose | 24.x | Already used by your Authentik stack |
+| Cloudflare Tunnel | N/A | One active tunnel, credentials file on the NAS |
+| Authentik | 2025.6.x | Container alias **`server`**, port **9000** |
+| Go (local dev) | ≥ 1.22 (optional) | Only needed if you hack the code directly |
+
+---
+
+## 1  Quick Start (“I just want it running”)
+
+```bash
+# clone your fork on the NAS
+git clone https://github.com/argon-analytik/psso-server-go.git
+cd psso-server-go
+
+# copy & edit env file
+cp .env.psso .env      # adjust secrets only if they change
+
+# launch only the PSSO overlay beside the existing Authentik stack
+docker compose -f ../authentik/docker-compose.yml \
+               -f docker-compose.override.yml      \
+               --env-file .env up -d
+
+# check health endpoint
+curl -vk http://localhost:9100/healthz   # → "ok"
 ```
 
-## Modifying Defaults
+If you visit <https://psso.argio.ch/.well-known/jwks.json> in a browser and
+receive JSON (no TLS warning), the tunnel is active.
 
-Set up the environment variables for the service configuration:
+---
 
-_PSSO\_ISSUER_ Issuer (required, no default value. Usually URL to IdP like https://idp.example.com). Used for Iss in JWT. Must match the Issuer key in the config profile for the sample app "Scissors" or issuer in ASAuthorizationProviderExtensionLoginConfiguration as shown below:
+## 2  Important ENV Variables
 
-> let config = ASAuthorizationProviderExtensionLoginConfiguration(clientID:clientID , issuer: *issuer*, tokenEndpointURL: tokenEndpoint, jwksEndpointURL: jwksEndpoint, audience: audience)
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `PSSO_ADDRESS` | server listen address | `:9100` |
+| `PSSO_ISSUER`  | must equal **Issuer** value in your macOS profile | `https://auth.argio.ch` |
+| `PSSO_AUDIENCE`| audience claim in JWT | `macos` |
+| `PSSO_DEVICE_REG_PATH` | device‑registration endpoint | `/v1/device/register` |
+| `PSSO_USER_REG_PATH`   | user‑token endpoint | `/v1/user/token` |
+| `PSSO_ADMIN_GROUPS`    | Authentik group → local macOS admin | `argon_admins` |
+| `AUTHENTIK_TOKEN_ENDPOINT` | internal IdP token URL | `http://server:9000/application/o/token/` |
+| `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` | confidential client for Password‑Grant | *(see .env.psso)* |
 
+Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
+`.env.psso` and rarely need changes.
 
-_PSSO\_AUDIENCE_ (psso): Audience. Used for Aud in JWT.
+---
 
-_PSSO\_ADDRESS_ (:6443): Network address and port to listen on.
+## 3  Integrate with the macOS Profile
 
-_PSSO\_JWKSFILEPATH_ (/var/psso/jwks.json): Path to JSON file where the service keys will be created and stored.
+1. Build & notarize the **Argio SSO** extension (see that repo’s README).  
+2. Import `deployment/argio_PSSO.mobileconfig` into Mosyle.  
+   *ExtensionIdentifier* must equal your macOS bundle ID  
+   (`ch.argio.sso.extension-macos`).  
+3. Assign package + profile to a test Mac, reboot → login with Authentik user.
 
-_PSSO\_TLSPRIVATEKEYPATH_ (/etc/psso/privkey.pem): Path to TLS certificate in PEM format.
+---
 
-_PSSO\_TLSCERTIFICATECHAINPATH_ (/etc/psso/fullchain.pem): Path to folder where device keys are stored. Each registered device will be in its own file in this folder.
+## 4  Common Troubleshooting
 
-_PSSO\_DEVICEFILEPATH_: /var/psso/devices): Path to folder where device keys
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| macOS login window ignores cloud creds | wrong `Issuer` or server TLS issue | check profile keys + `.well‑known/apple-app-site-association` |
+| “invalid_grant” in server log | wrong client secret | match secret in Authentik Application |
+| `/healthz` OK, but 404 on `/v1/user/token` | container didn’t pick up env paths | `docker compose exec psso env | grep PSSO_USER_REG_PATH` |
 
-_PSSO\_NONCEPATH_: /var/psso/nonce): Path to folder where nonce are stored. Each nonce will be in its own file in this folder.
+---
 
-_PSSO\_KEYPATH_ (/var/psso/keys): Path to folder where device keys are stored. Each device key will be in its own file in this folder. This file is used to look up the device file when a key id is given.
+## 5  Next Steps / Ideas
 
-_PSSO\_ENDPOINTNONCE_ (/psso/nonce): HTTP endpoint where the client requests a nonce.
+* Switch `AuthenticationMethod` to **Key** for password‑less login  
+* Add **SCIM** sync so Authentik auto‑creates Managed Apple IDs in ABM  
+* Enable Device‑Attestation (macOS 15) by setting `UseSharedDeviceKeys = true`
 
-_PSSO\_ENDPOINTREGISTER_ (/psso/register): HTTP endpoint where client registers a new device
+---
 
-_PSSO\_ENDPOINTTOKEN_ (/psso/token): HTTP token where client posts JWT tokens
+## Contribution / License
 
-_PSSO\_ENDPOINTJWKS_ (/psso/.well-known/jwks.json): HTTP endpoint for advertising the public key for the PSSO service.
+Code is MIT‑licensed (same as upstream Twocanoes).  
+Feel free to open PRs or issues in the [Argon‑Analytik](https://github.com/argon-analytik) org.
+PRs should pass `go vet` and the basic health‑check compose test.
 
-
-## Thanks
-Thanks to Joel Rennich for his deep dive into figuring out the details of PSSO and providing guidance on how this all works.
+Happy cloud logins! 🚀
+```
