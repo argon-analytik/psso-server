@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/twocanoes/psso-server/pkg/constants"
+	"github.com/argon-analytik/psso-server/pkg/constants"
 )
 
 func TestRegisterCreatesKeyFiles(t *testing.T) {

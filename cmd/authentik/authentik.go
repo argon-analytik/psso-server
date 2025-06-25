@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/twocanoes/psso-server/pkg/constants"
+	"github.com/argon-analytik/psso-server/pkg/constants"
 )
 
 // VerifyAndFetchRoles contacts the Authentik token endpoint using the Password

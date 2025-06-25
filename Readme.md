@@ -117,6 +117,6 @@ Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
 
 ## Contribution / License
 
-Code is MIT‑licensed (same as upstream Twocanoes).  
+Code is MIT‑licensed.
 Feel free to open PRs or issues in the [Argon‑Analytik](https://github.com/argon-analytik) org.
 PRs should pass `go vet` and the basic health‑check compose test.
