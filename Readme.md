@@ -44,8 +44,8 @@ compose network and is exposed publicly via a **Cloudflare Tunnel** as
 
 ```bash
 # clone your fork on the NAS
-git clone https://github.com/argon-analytik/psso-server-go.git
-cd psso-server-go
+git clone https://github.com/argon-analytik/psso-server.git
+cd psso-server
 
 # copy & edit env file
 cp .env.psso .env      # adjust secrets only if they change
