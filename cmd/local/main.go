@@ -104,6 +104,11 @@ func main() {
 
 	// set up handlers
 
+	if env := os.Getenv("PSSO_ADMIN_GROUPS"); env != "" {
+		constants.AdminGroups = env
+	}
+	log.Printf("Admin groups: %v", constants.AdminGroups)
+
 	handlers.CheckWellKnowns()
 
 	run()
