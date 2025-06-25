@@ -22,6 +22,11 @@ var (
 	NoncePath               = getEnv("PSSO_NONCEPATH", filepath.FromSlash("/var/psso/nonce"))
 	KeyPath                 = getEnv("PSSO_KEYPATH", filepath.FromSlash("/var/psso/keys"))
 
+	AuthentikTokenEndpoint = getEnv("AUTHENTIK_TOKEN_ENDPOINT", "")
+	AuthentikClientID      = getEnv("AUTHENTIK_CLIENT_ID", "")
+	AuthentikClientSecret  = getEnv("AUTHENTIK_CLIENT_SECRET", "")
+	AdminGroups            = getEnv("PSSO_ADMIN_GROUPS", "argon_admins")
+
 	EndpointJWKS           = getEnv("PSSO_ENDPOINTJWKS", "/.well-known/jwks.json")
 	EndpointAppleSiteAssoc = getEnv("PSSO_ENDPOINTAPPLESITEASSOC", "/.well-known/apple-app-site-association")
 	EndpointNonce          = getEnv("PSSO_ENDPOINTNONCE", "/nonce")
