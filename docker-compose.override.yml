@@ -4,8 +4,8 @@ services:
     build: .
     env_file:
       - .env.psso
-    ports:
-      - "9100:9100"
+    expose:
+      - "9100"
     restart: unless-stopped
     networks:
       - tunnel
