@@ -81,8 +81,12 @@ func WellKnownJWKS() http.HandlerFunc {
 		// fmt.Println(string(requestDump))
 
 		fmt.Println("Request for .well-known/jwks.json")
-		response, _ := json.Marshal(jsonJWKS)
-		w.Write(response)
+		payload, err := json.Marshal(jsonJWKS)
+		if err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+			return
+		}
+		w.Write(payload)
 	}
 }
 
@@ -98,7 +102,11 @@ func WellKnownAASA() http.HandlerFunc {
 		fmt.Println(string(requestDump))
 
 		fmt.Println("Request for .well-known/apple-app-site-association")
-		response, _ := json.Marshal(currentAASA)
-		w.Write(response)
+		payload, err := json.Marshal(currentAASA)
+		if err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+			return
+		}
+		w.Write(payload)
 	}
 }
