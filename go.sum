@@ -11,10 +11,6 @@ github.com/square/go-jose v2.6.0+incompatible/go.mod h1:7MxpAF/1WTVUu8Am+T5kNy+t
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.7.0 h1:nwc3DEeHmmLAfoZucVR881uASk0Mfjw8xYJ99tb5CcY=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
-github.com/twocanoes/psso-sdk-go v0.0.0-20240510214858-face796de5b5 h1:tm47dQO7neCSTDZacMt/WQI3dDaW6ZmYzxiPE+enpDU=
-github.com/twocanoes/psso-sdk-go v0.0.0-20240510214858-face796de5b5/go.mod h1:aPkqf3KiYRrG70nRKrxDC52IMV9I2pNz7EpSoLD30fo=
-github.com/twocanoes/psso-sdk-go v0.0.0-20240527164039-7547a790f5fd h1:p7557glduGuNrK36w4pY/udREBAgDKLgcAhKJTXVxjQ=
-github.com/twocanoes/psso-sdk-go v0.0.0-20240527164039-7547a790f5fd/go.mod h1:dHiHwCOWiBRQtB7FKsNYhEaPFytuxZka0U6NnUGi+vY=
 github.com/twocanoes/psso-sdk-go v0.0.0-20240527231745-01635724a8f1 h1:4BFonY2UU/Yvleqd9VZsAk2fuK9JJ3kze4w/OfDwwOw=
 github.com/twocanoes/psso-sdk-go v0.0.0-20240527231745-01635724a8f1/go.mod h1:dHiHwCOWiBRQtB7FKsNYhEaPFytuxZka0U6NnUGi+vY=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
