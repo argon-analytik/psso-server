@@ -25,6 +25,7 @@ func NewRouter() *http.ServeMux {
 	router.HandleFunc(constants.EndpointNonce, handlers.Nonce())
 	router.HandleFunc(constants.EndpointRegister, handlers.Register())
 	router.HandleFunc(constants.EndpointToken, handlers.Token())
+	router.HandleFunc(constants.EndpointHealthz, handlers.Healthz())
 
 	return router
 }

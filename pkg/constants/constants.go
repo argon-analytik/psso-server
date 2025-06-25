@@ -27,6 +27,7 @@ var (
 	EndpointNonce          = getEnv("PSSO_ENDPOINTNONCE", "/nonce")
 	EndpointRegister       = getEnv("PSSO_ENDPOINTREGISTER", "/register")
 	EndpointToken          = getEnv("PSSO_ENDPOINTTOKEN", "/token")
+	EndpointHealthz        = getEnv("PSSO_ENDPOINTHEALTHZ", "/healthz")
 )
 
 func getEnv(key, fallback string) string {
