@@ -74,7 +74,8 @@ receive JSON (no TLS warning), the tunnel is active.
 | `PSSO_DEVICE_REG_PATH` | device‑registration endpoint | `/v1/device/register` |
 | `PSSO_USER_REG_PATH`   | user‑token endpoint | `/v1/user/token` |
 | `PSSO_ADMIN_GROUPS`    | Authentik group → local macOS admin | `argon_admins` |
-| `AUTHENTIK_TOKEN_ENDPOINT` | internal IdP token URL | `http://server:9000/application/o/token/` |
+| `AUTHENTIK_BASE_URL`   | base URL of your Authentik server | `http://server:9000` |
+| `AUTHENTIK_TOKEN_ENDPOINT` | internal IdP token URL | `${AUTHENTIK_BASE_URL}/application/o/token/` |
 | `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` | confidential client for Password‑Grant | *(see .env.psso)* |
 
 Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
