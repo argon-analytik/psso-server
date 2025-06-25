@@ -1,13 +1,13 @@
 package handlers
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -122,7 +122,11 @@ func Register() http.HandlerFunc {
 		fmt.Println("Storing device: " + request.DeviceUUID)
 
 		keyExchangeKeyBytes := make([]byte, 32)
-		rand.Read(keyExchangeKeyBytes)
+		_, err = rand.Read(keyExchangeKeyBytes)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 
 		newDevice := file.Device{
 			Device:         request.DeviceUUID,
