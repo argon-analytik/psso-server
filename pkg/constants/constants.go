@@ -27,6 +27,11 @@ var (
 	EndpointNonce          = getEnv("PSSO_ENDPOINTNONCE", "/nonce")
 	EndpointRegister       = getEnv("PSSO_ENDPOINTREGISTER", "/register")
 	EndpointToken          = getEnv("PSSO_ENDPOINTTOKEN", "/token")
+
+	AuthentikBaseURL       = getEnv("AUTHENTIK_BASE_URL", "http://server:9000")
+	AuthentikTokenEndpoint = getEnv("AUTHENTIK_TOKEN_ENDPOINT", AuthentikBaseURL+"/application/o/token/")
+	AuthentikClientID      = getEnv("AUTHENTIK_CLIENT_ID", "")
+	AuthentikClientSecret  = getEnv("AUTHENTIK_CLIENT_SECRET", "")
 )
 
 func getEnv(key, fallback string) string {
