@@ -1,122 +1,164 @@
-# Argio Platform SSO Server (`psso-server`)
+# Argio PSSO Server
 
-A lightweight Go service that implements Apple’s **Platform Single Sign‑On (PSSO)**
-protocol and delegates all credential checks to your **Authentik** IdP
-(`https://auth.argio.ch`).  
-When combined with the *Argio SSO* macOS/iOS extension, it allows users to:
-
-* log in **directly at the macOS login window** with their Authentik account  
-* receive just‑in‑time local accounts & group mappings  
-* unlock the Mac with the same cloud password (Touch ID / Face ID supported)  
-* enjoy seamless SSO in Safari & native apps once the desktop appears
-
-The server runs in Docker on your Synology NAS, listens on **:9100** inside the
-compose network and is exposed publicly via a **Cloudflare Tunnel** as  
-`https://psso.argio.ch`.
+Minimal, production‑ready service for Apple Platform SSO setups with Authentik as IdP — without password grant. Provides only the endpoints macOS/iOS actually need, and plays nicely behind Cloudflare/HAProxy. Reproducible and container‑first.
 
 ---
 
-## Directory layout
+## Features
+
+- AASA endpoint: `/.well-known/apple-app-site-association`
+- JWKS (public keys only): `/.well-known/jwks.json`
+- Health check: `/healthz`
+- No ROPC or password‑grant flows; PKCE/OAuth handled by the Platform SSO extension ↔ Authentik
+- Cloud proxy friendly (HTTP, no in‑process TLS; terminate at CF/HAProxy)
+- Reproducible Docker build
+
+---
+
+## Overview
+
+- Purpose: Serve AASA and JWKS for Apple’s Platform SSO so that macOS can discover the extension and validate tokens/keys. The extension itself talks to Authentik using PKCE; this server does not relay user credentials.
+- Scope: Only well‑knowns + health. Legacy endpoints for device register/token exist in the repo but are not exposed by default.
+
+---
+
+## Endpoints
+
+- `/.well-known/apple-app-site-association` (AASA)
+  - Content‑Type: `application/json`
+  - Payload (minimal): `{ "authsrv": { "apps": [ "${TEAM_ID}.${APP_BUNDLE_ID}" ] } }`
+  - Also includes empty `applinks` and `webcredentials`
+- `/.well-known/jwks.json` (JWKS)
+  - Returns a public‑only JSON Web Key Set (RSA, RS256)
+  - If `JWKS_PATH` doesn’t exist, a new key is generated on first request; `kid = unix timestamp`
+- `/healthz` (Health)
+  - Returns `ok` (200)
+
+---
+
+## Quick Start
+
+1) Requirements
+- go >= 1.22, docker, jq, curl
+
+2) Configure `.env.psso`
 ```
-.
-├── cmd/
-│   └── authentik/               # Authentik integrations
-├── docker-compose.override.yml  # psso + cloudflared overlay
-├── Dockerfile                   # builds the psso-server binary
-├── .env.psso                    # example env‑file (edit & copy!)
-└── README.md                    # this file
+PSSO_ADDRESS=:9100
+TEAM_ID=QUR8QTGXNB
+APP_BUNDLE_ID=ch.argio.psso
+JWKS_PATH=./dist/jwks.json
+JWKS_KEY_BITS=2048
 ```
 
----
-
-## Prerequisites
-
-| Tool | Version | Comment |
-|------|---------|---------|
-| Docker / Docker Compose | 24.x | Already used by your Authentik stack |
-| Cloudflare Tunnel | N/A | One active tunnel, credentials file on the NAS |
-| Authentik | 2025.6.x | Container alias **`server`**, port **9000** |
-| Go (local dev) | ≥ 1.22 (optional) | Only needed if you hack the code directly |
-
----
-
-## 1 · Quick Start (“I just want it running”)
-
+3) Build / run locally
 ```bash
-# clone your fork on the NAS
-git clone https://github.com/argon-analytik/psso-server.git
-cd psso-server
+chmod +x scripts/*.sh
+./scripts/dev_up.sh
 
-# copy & edit env file
-cp .env.psso .env      # adjust secrets only if they change
-
-# launch only the PSSO overlay beside the existing Authentik stack
-docker compose -f ../authentik/docker-compose.yml \
-               -f docker-compose.override.yml      \
-               --env-file .env up -d
-
-# check health endpoint
-curl -vk http://localhost:9100/healthz   # → "ok"
-
-# inspect well-known endpoints
-curl -vk http://localhost:9100/.well-known/jwks.json                 # → HTTP/200 & JSON
-curl -vk http://localhost:9100/.well-known/apple-app-site-association # → HTTP/200 & JSON
+# (optional) start via compose for shared nets
+docker compose -f docker-compose.haproxy.yml --env-file .env.psso up -d --build
 ```
 
-If you visit <https://psso.argio.ch/.well-known/jwks.json> in a browser and
-receive JSON (no TLS warning), the tunnel is active.
+4) Verify endpoints
+```bash
+curl -s http://localhost:9100/healthz
+curl -s http://localhost:9100/.well-known/apple-app-site-association | jq .
+curl -s http://localhost:9100/.well-known/jwks.json | jq .
+```
 
 ---
 
-## 2 · Important ENV Variables
+## Apple/AASA Notes
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `PSSO_ADDRESS` | server listen address | `:9100` |
-| `PSSO_ISSUER`  | must equal **Issuer** value in your macOS profile | `https://auth.argio.ch` |
-| `PSSO_AUDIENCE`| audience claim in JWT | `macos` |
-| `PSSO_DEVICE_REG_PATH` | device‑registration endpoint | `/v1/device/register` |
-| `PSSO_USER_REG_PATH`   | user‑token endpoint | `/v1/user/token` |
-| `PSSO_ADMIN_GROUPS`    | Authentik group → local macOS admin | `argon_admins` |
-| `AUTHENTIK_BASE_URL`   | base URL of your Authentik server | `http://server:9000` |
-| `AUTHENTIK_TOKEN_ENDPOINT` | internal IdP token URL | `${AUTHENTIK_BASE_URL}/application/o/token/` |
-| `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` | confidential client for Password‑Grant | *(see .env.psso)* |
-
-Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
-`.env.psso` and rarely need changes.
+- AASA must be served at your auth host without redirects, for example:
+  - `https://auth.argio.ch/.well-known/apple-app-site-association`
+- Ensure `Content-Type: application/json`
+- Test on macOS:
+  - `sudo swcutil dl -d auth.argio.ch`
+  - `sudo swcutil show | grep -A3 auth.argio.ch`
 
 ---
 
-## 3 · Integrate with the macOS Profile
+## Reverse Proxy Examples
 
-1. Build & notarize the **Argio SSO** extension (see that repo’s README).  
-2. Import `deployment/argio_PSSO.mobileconfig` into Mosyle.  
-   *ExtensionIdentifier* must equal your macOS bundle ID  
-   (`ch.argio.sso.extension-macos`).  
-3. Assign package + profile to a test Mac, reboot → login with Authentik user.
+HAProxy:
+```
+acl is_aasa path_beg /.well-known/apple-app-site-association
+acl is_jwks path_beg /.well-known/jwks.json
+use_backend bk_psso if is_aasa or is_jwks
+backend bk_psso
+  server psso psso:9100 check
+```
 
----
-
-## 4 · Common Troubleshooting
-
-| Symptom | Likely cause | Fix |
-|---------|--------------|-----|
-| macOS login window ignores cloud creds | wrong `Issuer` or server TLS issue | check profile keys + `.well‑known/apple-app-site-association` |
-| “invalid_grant” in server log | wrong client secret | match secret in Authentik Application |
-| `/healthz` OK, but 404 on `/v1/user/token` | container didn’t pick up env paths | `docker compose exec psso env | grep PSSO_USER_REG_PATH` |
-
----
-
-## 5 · Next Steps / Ideas
-
-* Switch `AuthenticationMethod` to **Key** for password‑less login  
-* Add **SCIM** sync so Authentik auto‑creates Managed Apple IDs in ABM  
-* Enable Device‑Attestation (macOS 15) by setting `UseSharedDeviceKeys = true`
+cloudflared (config.yml excerpt):
+```
+ingress:
+  - hostname: auth.argio.ch
+    path: /.well-known/*
+    service: http://psso:9100
+  - hostname: auth.argio.ch
+    service: http://authentik:9000
+```
 
 ---
 
-## Contribution / License
+## Configuration
 
-Code is MIT‑licensed.
-Feel free to open PRs or issues in the [Argon‑Analytik](https://github.com/argon-analytik) org.
-PRs should pass `go vet` and the basic health‑check compose test.
+- `PSSO_ADDRESS`: server listen address (default `:9100`)
+- `TEAM_ID`: Apple Team ID (e.g., `QUR8QTGXNB`)
+- `APP_BUNDLE_ID`: App Bundle ID (e.g., `ch.argio.psso`)
+- `JWKS_PATH`: path for JWKS file (default `./dist/jwks.json`)
+- `JWKS_KEY_BITS`: RSA key length (default `2048`)
+
+Notes:
+- The service runs HTTP only; terminate TLS at your proxy.
+- JWKS file persists between restarts; mount a volume (compose already maps `./dist`).
+- Additional env in code (issuer/audience, legacy paths) exist but are not required for the minimal AASA/JWKS/Health setup.
+
+---
+
+## Repository Layout
+
+- `cmd/local/main.go`: HTTP server and routes (no TLS), exposes AASA/JWKS/Health
+- `pkg/handlers/well-known.go`: AASA + JWKS handlers and init
+- `pkg/jwks/jwks.go`: JWKS loader/creator (RSA, RS256)
+- `pkg/constants/constants.go`: configuration and env helpers
+- `Dockerfile`: multi‑stage Go build
+- `docker-compose.haproxy.yml`: service with volume for `dist`, proxy‑friendly
+- `scripts/dev_up.sh`: local build helper
+- `scripts/test_endpoints.sh`: quick endpoint checks
+
+Legacy (not registered by default):
+- `pkg/handlers/{token.go,register.go,nonce.go}` and `cmd/authentik/*`
+
+---
+
+## Development
+
+- Install Go 1.22+
+- Run `./scripts/dev_up.sh` to tidy, vet, and build
+- Use `docker compose -f docker-compose.haproxy.yml --env-file .env.psso up -d --build` to run in Docker
+
+---
+
+## Troubleshooting
+
+- 404 on AASA/JWKS behind proxy: ensure path rules route `/.well-known/*` to psso
+- Wrong AASA content type: verify `Content-Type: application/json`
+- JWKS not found: first request creates it; check write permissions on `JWKS_PATH`
+- macOS doesn’t pick up extension: verify AASA reachable over HTTPS without redirect and TeamID+BundleID string
+
+---
+
+## Security
+
+- JWKS is public‑only; no private keys are served
+- No password grant or ROPC endpoints are exposed
+- TLS should be terminated by Cloudflare/HAProxy; service itself listens on HTTP only
+
+---
+
+## License & Contributions
+
+- MIT License
+- PRs and issues welcome. Keep changes focused and pass `go vet`.

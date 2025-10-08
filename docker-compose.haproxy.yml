@@ -1,0 +1,14 @@
+version: "3.9"
+services:
+  psso:
+    build: .
+    image: argio/psso-server:local
+    env_file: .env.psso
+    restart: unless-stopped
+    expose:
+      - "9100"
+    volumes:
+      - ./dist:/app/dist
+# Hinweis: Wird in ein gemeinsames Docker-Netz mit Authentik/HAProxy gehängt,
+# oder via cloudflared per Ingress geroutet.
+
