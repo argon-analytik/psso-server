@@ -1,122 +1,97 @@
-# Argio Platform SSO Server (`psso-server`)
+# Argio PSSO Server (AASA/JWKS/Health)
 
-A lightweight Go service that implements Apple’s **Platform Single Sign‑On (PSSO)**
-protocol and delegates all credential checks to your **Authentik** IdP
-(`https://auth.argio.ch`).  
-When combined with the *Argio SSO* macOS/iOS extension, it allows users to:
+Minimal Go service providing:
 
-* log in **directly at the macOS login window** with their Authentik account  
-* receive just‑in‑time local accounts & group mappings  
-* unlock the Mac with the same cloud password (Touch ID / Face ID supported)  
-* enjoy seamless SSO in Safari & native apps once the desktop appears
+- AASA at `/.well-known/apple-app-site-association`
+- JWKS (public keys only) at `/.well-known/jwks.json`
+- Health at `/healthz`
 
-The server runs in Docker on your Synology NAS, listens on **:9100** inside the
-compose network and is exposed publicly via a **Cloudflare Tunnel** as  
-`https://psso.argio.ch`.
+No password flows (ROPC) – OAuth/OIDC (PKCE) is handled directly between the Apple Platform SSO extension and Authentik. Cloudflare/HAProxy friendly.
 
 ---
 
-## Directory layout
+## Usage
+
+1) Requirements
+
+- go >= 1.22, docker, jq, curl
+
+2) Configure `.env.psso`
+
 ```
-.
-├── cmd/
-│   └── authentik/               # Authentik integrations
-├── docker-compose.override.yml  # psso + cloudflared overlay
-├── Dockerfile                   # builds the psso-server binary
-├── .env.psso                    # example env‑file (edit & copy!)
-└── README.md                    # this file
+PSSO_ADDRESS=:9100
+TEAM_ID=QUR8QTGXNB
+APP_BUNDLE_ID=ch.argio.psso
+JWKS_PATH=./dist/jwks.json
+JWKS_KEY_BITS=2048
 ```
 
----
-
-## Prerequisites
-
-| Tool | Version | Comment |
-|------|---------|---------|
-| Docker / Docker Compose | 24.x | Already used by your Authentik stack |
-| Cloudflare Tunnel | N/A | One active tunnel, credentials file on the NAS |
-| Authentik | 2025.6.x | Container alias **`server`**, port **9000** |
-| Go (local dev) | ≥ 1.22 (optional) | Only needed if you hack the code directly |
-
----
-
-## 1 · Quick Start (“I just want it running”)
+3) Start locally/build
 
 ```bash
-# clone your fork on the NAS
-git clone https://github.com/argon-analytik/psso-server.git
-cd psso-server
+chmod +x scripts/*.sh
+./scripts/dev_up.sh
 
-# copy & edit env file
-cp .env.psso .env      # adjust secrets only if they change
-
-# launch only the PSSO overlay beside the existing Authentik stack
-docker compose -f ../authentik/docker-compose.yml \
-               -f docker-compose.override.yml      \
-               --env-file .env up -d
-
-# check health endpoint
-curl -vk http://localhost:9100/healthz   # → "ok"
-
-# inspect well-known endpoints
-curl -vk http://localhost:9100/.well-known/jwks.json                 # → HTTP/200 & JSON
-curl -vk http://localhost:9100/.well-known/apple-app-site-association # → HTTP/200 & JSON
+# (optional) start via compose for HAProxy/cloudflared nets
+docker compose -f docker-compose.haproxy.yml --env-file .env.psso up -d --build
 ```
 
-If you visit <https://psso.argio.ch/.well-known/jwks.json> in a browser and
-receive JSON (no TLS warning), the tunnel is active.
+4) Test endpoints
+
+```bash
+curl -s http://localhost:9100/healthz
+curl -s http://localhost:9100/.well-known/apple-app-site-association | jq .
+curl -s http://localhost:9100/.well-known/jwks.json | jq .
+```
 
 ---
 
-## 2 · Important ENV Variables
+## AASA Requirements
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `PSSO_ADDRESS` | server listen address | `:9100` |
-| `PSSO_ISSUER`  | must equal **Issuer** value in your macOS profile | `https://auth.argio.ch` |
-| `PSSO_AUDIENCE`| audience claim in JWT | `macos` |
-| `PSSO_DEVICE_REG_PATH` | device‑registration endpoint | `/v1/device/register` |
-| `PSSO_USER_REG_PATH`   | user‑token endpoint | `/v1/user/token` |
-| `PSSO_ADMIN_GROUPS`    | Authentik group → local macOS admin | `argon_admins` |
-| `AUTHENTIK_BASE_URL`   | base URL of your Authentik server | `http://server:9000` |
-| `AUTHENTIK_TOKEN_ENDPOINT` | internal IdP token URL | `${AUTHENTIK_BASE_URL}/application/o/token/` |
-| `AUTHENTIK_CLIENT_ID` / `AUTHENTIK_CLIENT_SECRET` | confidential client for Password‑Grant | *(see .env.psso)* |
+- Must be reachable at `https://auth.argio.ch/.well-known/apple-app-site-association` without redirect
+- Content-Type `application/json`
+- Minimal payload:
 
-Advanced paths (`PSSO_KEYPATH`, `PSSO_ENDPOINTJWKS` …) are pre‑populated in
-`.env.psso` and rarely need changes.
+```
+{ "authsrv": { "apps": [ "${TEAM_ID}.${APP_BUNDLE_ID}" ] } }
+```
 
----
+On macOS test with:
 
-## 3 · Integrate with the macOS Profile
-
-1. Build & notarize the **Argio SSO** extension (see that repo’s README).  
-2. Import `deployment/argio_PSSO.mobileconfig` into Mosyle.  
-   *ExtensionIdentifier* must equal your macOS bundle ID  
-   (`ch.argio.sso.extension-macos`).  
-3. Assign package + profile to a test Mac, reboot → login with Authentik user.
+```bash
+sudo swcutil dl -d auth.argio.ch
+sudo swcutil show | grep -A3 auth.argio.ch
+```
 
 ---
 
-## 4 · Common Troubleshooting
+## Reverse Proxy Examples
 
-| Symptom | Likely cause | Fix |
-|---------|--------------|-----|
-| macOS login window ignores cloud creds | wrong `Issuer` or server TLS issue | check profile keys + `.well‑known/apple-app-site-association` |
-| “invalid_grant” in server log | wrong client secret | match secret in Authentik Application |
-| `/healthz` OK, but 404 on `/v1/user/token` | container didn’t pick up env paths | `docker compose exec psso env | grep PSSO_USER_REG_PATH` |
+HAProxy:
+
+```
+acl is_aasa path_beg /.well-known/apple-app-site-association
+acl is_jwks path_beg /.well-known/jwks.json
+use_backend bk_psso if is_aasa or is_jwks
+backend bk_psso
+  server psso psso:9100 check
+```
+
+cloudflared (config.yml excerpt):
+
+```
+ingress:
+  - hostname: auth.argio.ch
+    path: /.well-known/*
+    service: http://psso:9100
+  - hostname: auth.argio.ch
+    service: http://authentik:9000
+```
 
 ---
 
-## 5 · Next Steps / Ideas
+## Notes
 
-* Switch `AuthenticationMethod` to **Key** for password‑less login  
-* Add **SCIM** sync so Authentik auto‑creates Managed Apple IDs in ABM  
-* Enable Device‑Attestation (macOS 15) by setting `UseSharedDeviceKeys = true`
-
----
-
-## Contribution / License
-
-Code is MIT‑licensed.
-Feel free to open PRs or issues in the [Argon‑Analytik](https://github.com/argon-analytik) org.
-PRs should pass `go vet` and the basic health‑check compose test.
+- JWKS is created on first request if missing (RSA, RS256, kid=timestamp)
+- File path from `JWKS_PATH`; defaults to `./dist/jwks.json`
+- No ROPC endpoints are registered

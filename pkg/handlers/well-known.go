@@ -1,112 +1,76 @@
 package handlers
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httputil"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "net/http/httputil"
+    "strconv"
 
-	"github.com/argon-analytik/psso-server/pkg/constants"
-	"github.com/argon-analytik/psso-server/pkg/file"
-	"github.com/twocanoes/psso-sdk-go/psso"
+    "github.com/argon-analytik/psso-server/pkg/constants"
+    "github.com/argon-analytik/psso-server/pkg/jwks"
 )
 
-var jsonJWKS JSONJWKS
 var currentAASA JSONAASA
 
 type JSONAuthServe struct {
-	Apps []string `json:"apps"`
+    Apps []string `json:"apps"`
 }
 
 type JSONAASA struct {
-	AuthServ JSONAuthServe `json:"authsrv"`
-}
-
-type JSONJWK struct {
-	KeyType   string `json:"kty"`
-	Use       string `json:"use"`
-	Curve     string `json:"crv"`
-	KeyID     string `json:"kid"`
-	X         string `json:"x"`
-	Y         string `json:"y"`
-	Algorithm string `json:"alg"`
-}
-
-type JSONJWKS struct {
-	Keys []JSONJWK `json:"keys"`
+    AuthServ       JSONAuthServe  `json:"authsrv"`
+    Applinks       map[string]any `json:"applinks,omitempty"`
+    Webcredentials map[string]any `json:"webcredentials,omitempty"`
 }
 
 func CheckWellKnowns() {
+    fmt.Println("Initializing well-knowns")
 
-	var jwks psso.JWKS
-	fmt.Println("Checking JWKS")
+    // Ensure JWKS exists on startup
+    bits, _ := strconv.Atoi(constants.JWKSKeyBits)
+    if _, err := jwks.LoadOrCreate(constants.JWKSPath, bits); err != nil {
+        fmt.Println("JWKS init error:", err)
+    }
 
-	tJwks, err := file.GetJWKS()
-	if err != nil {
-		panic(err)
-	}
-	jwks = *tJwks
-
-	jsonJWK := JSONJWK{
-		KeyType:   "EC",
-		Use:       "sig",
-		Curve:     "P-256",
-		Algorithm: "ES256",
-		KeyID:     jwks.KID,
-		X:         jwks.X,
-		Y:         jwks.Y,
-	}
-
-	jsonJWKS = JSONJWKS{
-		Keys: []JSONJWK{jsonJWK},
-	}
-
-	// build AASA
-
-	currentAASA = JSONAASA{
-		AuthServ: JSONAuthServe{
-			Apps: constants.AASAApps[:],
-		},
-	}
+    // Build AASA with env-derived app id
+    currentAASA = JSONAASA{
+        AuthServ: JSONAuthServe{
+            Apps: constants.AASAApps[:],
+        },
+        Applinks:       map[string]any{},
+        Webcredentials: map[string]any{},
+    }
 }
 
 func WellKnownJWKS() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-
-		// // Dump the request to see what we have here
-		// requestDump, err := httputil.DumpRequest(r, true)
-		// if err != nil {
-		// 	fmt.Println(err)
-		// }
-		// fmt.Println(string(requestDump))
-
-		fmt.Println("Request for .well-known/jwks.json")
-		payload, err := json.Marshal(jsonJWKS)
-		if err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
-			return
-		}
-		w.Write(payload)
-	}
+    return func(w http.ResponseWriter, r *http.Request) {
+        fmt.Println("Request for .well-known/jwks.json")
+        bits, _ := strconv.Atoi(constants.JWKSKeyBits)
+        data, err := jwks.LoadOrCreate(constants.JWKSPath, bits)
+        if err != nil {
+            http.Error(w, "failed to load jwks", http.StatusInternalServerError)
+            return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        w.Write(data)
+    }
 }
 
 func WellKnownAASA() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Log basic request line and headers once for debugging
+        requestDump, _ := httputil.DumpRequest(r, false)
+        fmt.Println(string(requestDump))
 
-		// Dump the request to see what we have here
-		requestDump, err := httputil.DumpRequest(r, true)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		fmt.Println(string(requestDump))
-
-		fmt.Println("Request for .well-known/apple-app-site-association")
-		payload, err := json.Marshal(currentAASA)
-		if err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
-			return
-		}
-		w.Write(payload)
-	}
+        fmt.Println("Request for .well-known/apple-app-site-association")
+        payload, err := json.Marshal(currentAASA)
+        if err != nil {
+            http.Error(w, "failed to encode response", http.StatusInternalServerError)
+            return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        w.Write(payload)
+    }
 }
