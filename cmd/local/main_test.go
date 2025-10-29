@@ -100,6 +100,9 @@ func TestNewRouterRegistersExpectedRoutes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.path == constants.EndpointToken && tc.method == http.MethodPost {
+				req.Header.Set("Accept", "application/platformsso-login-response+jwt")
+			}
 			rr := httptest.NewRecorder()
 
 			handler, pattern := router.Handler(req)
