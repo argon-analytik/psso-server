@@ -20,6 +20,11 @@ func NewRouter() *http.ServeMux {
     router.HandleFunc(constants.EndpointJWKS, handlers.WellKnownJWKS())
     router.HandleFunc(constants.EndpointAppleSiteAssoc, handlers.WellKnownAASA())
 
+    // handshake endpoints
+    router.HandleFunc(constants.EndpointNonce, handlers.Nonce())
+    router.HandleFunc(constants.EndpointRegister, handlers.Register())
+    router.HandleFunc(constants.EndpointToken, handlers.Token())
+
     // health
     router.HandleFunc(constants.EndpointHealthz, handlers.Healthz())
 

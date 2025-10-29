@@ -62,8 +62,9 @@ func Token() http.HandlerFunc {
 		// log.Write(string(requestDump)).Debug()
 
 		//make sure we have a post since that is the only http verb allowed at this endpoint.
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			fmt.Println("message not a POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 

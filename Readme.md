@@ -8,6 +8,7 @@ Minimal, production‑ready service for Apple Platform SSO setups with Authentik
 
 - AASA endpoint: `/.well-known/apple-app-site-association`
 - JWKS (public keys only): `/.well-known/jwks.json`
+- Platform SSO handshake: `/nonce`, `/register`, `/token`
 - Health check: `/healthz`
 - No ROPC or password‑grant flows; PKCE/OAuth handled by the Platform SSO extension ↔ Authentik
 - Cloud proxy friendly (HTTP, no in‑process TLS; terminate at CF/HAProxy)
@@ -18,7 +19,7 @@ Minimal, production‑ready service for Apple Platform SSO setups with Authentik
 ## Overview
 
 - Purpose: Serve AASA and JWKS for Apple’s Platform SSO so that macOS can discover the extension and validate tokens/keys. The extension itself talks to Authentik using PKCE; this server does not relay user credentials.
-- Scope: Only well‑knowns + health. Legacy endpoints for device register/token exist in the repo but are not exposed by default.
+- Scope: Well‑knowns (AASA, JWKS), health, and the Platform SSO handshake endpoints used by macOS during device registration.
 
 ---
 
@@ -31,6 +32,15 @@ Minimal, production‑ready service for Apple Platform SSO setups with Authentik
 - `/.well-known/jwks.json` (JWKS)
   - Returns a public‑only JSON Web Key Set (RSA, RS256)
   - If `JWKS_PATH` doesn’t exist, a new key is generated on first request; `kid = unix timestamp`
+- `/nonce` (Nonce)
+  - Returns JSON `{ "Nonce": "<base64>" }`
+  - Persists the nonce to `PSSO_NONCEPATH` for 5 minutes; ensure this path is writable
+- `/register` (Device registration)
+  - Expects POST JSON with device UUID + signing/encryption keys
+  - Stores metadata under `PSSO_DEVICEFILEPATH` and `PSSO_KEYPATH`
+- `/token` (Token exchange)
+  - Expects POST form-data (`platform_sso_version`, `assertion`/`request` JWT)
+  - Validates device state and returns a PSSO login response JWE
 - `/healthz` (Health)
   - Returns `ok` (200)
 
@@ -61,9 +71,17 @@ docker compose -f docker-compose.haproxy.yml --env-file .env.psso up -d --build
 
 4) Verify endpoints
 ```bash
-curl -s http://localhost:9100/healthz
-curl -s http://localhost:9100/.well-known/apple-app-site-association | jq .
-curl -s http://localhost:9100/.well-known/jwks.json | jq .
+# automatic smoke-test (includes /nonce)
+./scripts/test_endpoints.sh http://localhost:9100
+
+# manual handshake calls (sample payloads)
+curl -X POST http://localhost:9100/register \
+  -H 'Content-Type: application/json' \
+  --data '{"DeviceUUID":"<uuid>","DeviceSigningKey":"<pem>","DeviceEncryptionKey":"<pem>","SignKeyID":"<base64>","EncKeyID":"<base64>"}'
+
+curl -X POST http://localhost:9100/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data 'platform_sso_version=1.0&assertion=<JWT>'
 ```
 
 ---
@@ -85,8 +103,10 @@ HAProxy:
 ```
 acl is_aasa path_beg /.well-known/apple-app-site-association
 acl is_jwks path_beg /.well-known/jwks.json
-use_backend bk_psso if is_aasa or is_jwks
+acl is_handshake path_beg /nonce /register /token
+use_backend bk_psso if is_aasa or is_jwks or is_handshake
 backend bk_psso
+  http-response set-header Content-Type application/json if is_aasa or is_jwks
   server psso psso:9100 check
 ```
 
@@ -97,8 +117,19 @@ ingress:
     path: /.well-known/*
     service: http://psso:9100
   - hostname: auth.argio.ch
+    path: /nonce
+    service: http://psso:9100
+  - hostname: auth.argio.ch
+    path: /register
+    service: http://psso:9100
+  - hostname: auth.argio.ch
+    path: /token
+    service: http://psso:9100
+  - hostname: auth.argio.ch
     service: http://authentik:9000
 ```
+
+**Important:** Do not rewrite or redirect `/.well-known/*` paths. They must be served directly with `Content-Type: application/json`.
 
 ---
 
@@ -119,7 +150,7 @@ Notes:
 
 ## Repository Layout
 
-- `cmd/local/main.go`: HTTP server and routes (no TLS), exposes AASA/JWKS/Health
+- `cmd/local/main.go`: HTTP server and routes (no TLS), exposes AASA/JWKS/Health/Handshake
 - `pkg/handlers/well-known.go`: AASA + JWKS handlers and init
 - `pkg/jwks/jwks.go`: JWKS loader/creator (RSA, RS256)
 - `pkg/constants/constants.go`: configuration and env helpers
@@ -128,8 +159,8 @@ Notes:
 - `scripts/dev_up.sh`: local build helper
 - `scripts/test_endpoints.sh`: quick endpoint checks
 
-Legacy (not registered by default):
-- `pkg/handlers/{token.go,register.go,nonce.go}` and `cmd/authentik/*`
+Legacy helpers:
+- `cmd/authentik/*` (Authentik client utilities)
 
 ---
 
