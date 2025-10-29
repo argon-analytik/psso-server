@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,7 +27,7 @@ func newRouter(state store.Store, cryptoSvc *crypto.Service, authClient *authent
 	mux.HandleFunc(constants.EndpointAppleSiteAssoc, handlers.WellKnownAASA(constants.AASAApps()))
 	mux.HandleFunc(constants.EndpointJWKS, handlers.WellKnownJWKS(constants.JWKSPath))
 	mux.HandleFunc(constants.EndpointHealthz, handlers.Healthz())
-	mux.HandleFunc(constants.EndpointNonce, handlers.Nonce(state, 120*time.Second))
+	mux.HandleFunc(constants.EndpointNonce, handlers.Nonce(state))
 	mux.HandleFunc(constants.EndpointKey, handlers.Key(state))
 	mux.HandleFunc(constants.EndpointToken, handlers.Token(handlers.TokenDependencies{
 		Store:     state,
@@ -43,10 +44,6 @@ func newRouter(state store.Store, cryptoSvc *crypto.Service, authClient *authent
 }
 
 func run(ctx context.Context) error {
-	if _, err := os.Stat(constants.ServerSigningKeyPath); err != nil {
-		return fmt.Errorf("server signing key missing at %s: %w", constants.ServerSigningKeyPath, err)
-	}
-
 	cryptoSvc, err := crypto.NewService(constants.ServerSigningKeyPath, constants.ServerSigningKeyKID, constants.ServerEncryptionKeyPath)
 	if err != nil {
 		return fmt.Errorf("init crypto: %w", err)
@@ -100,6 +97,17 @@ func run(ctx context.Context) error {
 }
 
 func main() {
+	if strings.TrimSpace(constants.ServerSigningKeyPath) == "" {
+		log.Fatal("SERVER_SIGNING_KEY_PRIV_PATH is required")
+	}
+	info, err := os.Stat(constants.ServerSigningKeyPath)
+	if err != nil {
+		log.Fatalf("SERVER_SIGNING_KEY_PRIV_PATH=%q not readable: %v", constants.ServerSigningKeyPath, err)
+	}
+	if info.IsDir() {
+		log.Fatalf("SERVER_SIGNING_KEY_PRIV_PATH=%q must point to a PEM file", constants.ServerSigningKeyPath)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

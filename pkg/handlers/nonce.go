@@ -23,10 +23,9 @@ type nonceResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-func Nonce(state store.Store, ttl time.Duration) http.HandlerFunc {
-	if ttl <= 0 {
-		ttl = 120 * time.Second
-	}
+const nonceTTL = 120 * time.Second
+
+func Nonce(state store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -49,7 +48,7 @@ func Nonce(state store.Store, ttl time.Duration) http.HandlerFunc {
 			return
 		}
 		nonce := base64.RawURLEncoding.EncodeToString(buf)
-		expires := time.Now().UTC().Add(ttl)
+		expires := time.Now().UTC().Add(nonceTTL)
 
 		if err := state.SaveNonce(r.Context(), store.Nonce{Value: nonce, DeviceID: req.DeviceID, ExpiresAt: expires}); err != nil {
 			http.Error(w, "failed to persist nonce", http.StatusInternalServerError)
