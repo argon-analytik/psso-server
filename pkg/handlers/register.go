@@ -38,7 +38,8 @@ func Register() http.HandlerFunc {
 
 		// fmt.Println(string(requestDump))
 
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
