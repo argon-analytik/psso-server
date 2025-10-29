@@ -23,34 +23,23 @@ type TokenConfig struct {
 }
 
 const (
-	tokenAcceptKeyResponse   = "application/platformsso-key-response+jwt"
 	tokenAcceptLoginResponse = "application/platformsso-login-response+jwt"
+	tokenAcceptJWTFallback   = "application/jwt"
 )
 
-func negotiateTokenContentType(header http.Header) (string, bool) {
-	accepts := header.Values("Accept")
-	if len(accepts) == 0 {
-		return tokenAcceptLoginResponse, true
-	}
-
-	for _, value := range accepts {
-		for _, part := range strings.Split(value, ",") {
-			mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(part))
-			if err != nil {
-				continue
-			}
-			switch strings.ToLower(mediaType) {
-			case tokenAcceptKeyResponse:
-				return tokenAcceptKeyResponse, true
-			case tokenAcceptLoginResponse:
-				return tokenAcceptLoginResponse, true
-			case "*/*", "application/*":
-				return tokenAcceptLoginResponse, true
-			}
+func acceptsPSSOResponse(acceptHeader string) bool {
+	for _, part := range strings.Split(acceptHeader, ",") {
+		mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil {
+			continue
+		}
+		switch strings.ToLower(mediaType) {
+		case tokenAcceptLoginResponse, tokenAcceptJWTFallback:
+			return true
 		}
 	}
 
-	return "", false
+	return false
 }
 
 type tokenRequestClaims struct {
@@ -98,8 +87,35 @@ func Token(deps TokenDependencies) http.HandlerFunc {
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		contentType, ok := negotiateTokenContentType(r.Header)
-		if !ok {
+		accepts := r.Header.Values("Accept")
+		contentType := ""
+		for _, value := range accepts {
+			if !acceptsPSSOResponse(value) {
+				continue
+			}
+			for _, part := range strings.Split(value, ",") {
+				mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(part))
+				if err != nil {
+					continue
+				}
+				mediaType = strings.ToLower(mediaType)
+				switch mediaType {
+				case tokenAcceptLoginResponse:
+					contentType = tokenAcceptLoginResponse
+				case tokenAcceptJWTFallback:
+					if contentType == "" {
+						contentType = tokenAcceptJWTFallback
+					}
+				}
+				if contentType == tokenAcceptLoginResponse {
+					break
+				}
+			}
+			if contentType == tokenAcceptLoginResponse {
+				break
+			}
+		}
+		if contentType == "" {
 			writeJSONError(w, http.StatusNotAcceptable, "requested response content type not supported")
 			return
 		}
@@ -174,8 +190,20 @@ func Token(deps TokenDependencies) http.HandlerFunc {
 			return
 		}
 
-		if err := claims.Validate(josejwt.Expected{Time: time.Now()}); err != nil {
-			writeJSONError(w, http.StatusUnauthorized, "assertion expired or not yet valid")
+		now := time.Now().UTC()
+		if err := claims.Validate(josejwt.Expected{
+			Time:     now,
+			Audience: deps.Config.Audience,
+			Issuer:   deps.Config.Issuer,
+		}); err != nil {
+			switch {
+			case errors.Is(err, josejwt.ErrExpired), errors.Is(err, josejwt.ErrNotValidYet), errors.Is(err, josejwt.ErrIssuedInTheFuture):
+				writeJSONError(w, http.StatusUnauthorized, "assertion expired or not yet valid")
+			case errors.Is(err, josejwt.ErrInvalidAudience), errors.Is(err, josejwt.ErrInvalidIssuer):
+				writeJSONError(w, http.StatusUnauthorized, "assertion invalid: audience/issuer mismatch")
+			default:
+				writeJSONError(w, http.StatusUnauthorized, "assertion validation failed")
+			}
 			return
 		}
 		if claims.Nonce == "" {
@@ -237,8 +265,8 @@ func Token(deps TokenDependencies) http.HandlerFunc {
 				Issuer:   deps.Config.Issuer,
 				Subject:  claims.Username,
 				Audience: deps.Config.Audience,
-				IssuedAt: josejwt.NewNumericDate(time.Now().UTC()),
-				Expiry:   josejwt.NewNumericDate(time.Now().UTC().Add(5 * time.Minute)),
+				IssuedAt: josejwt.NewNumericDate(now),
+				Expiry:   josejwt.NewNumericDate(now.Add(5 * time.Minute)),
 				ID:       claims.Nonce,
 			},
 			DeviceID:             claims.DeviceID,
@@ -276,6 +304,8 @@ func Token(deps TokenDependencies) http.HandlerFunc {
 		_, _ = deps.Store.UpsertDevice(r.Context(), device)
 
 		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(encrypted))
 	}

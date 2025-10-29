@@ -1,71 +1,39 @@
 package handlers
 
-import (
-	"net/http"
-	"testing"
-)
+import "testing"
 
-func TestNegotiateTokenContentType(t *testing.T) {
+func TestAcceptsPSSOResponse(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name   string
-		header http.Header
-		want   string
-		ok     bool
+		header string
+		want   bool
 	}{
 		{
-			name:   "no accept defaults to login",
-			header: http.Header{},
-			want:   tokenAcceptLoginResponse,
-			ok:     true,
+			name:   "login response",
+			header: "application/platformsso-login-response+jwt",
+			want:   true,
 		},
 		{
-			name: "explicit key response",
-			header: http.Header{
-				"Accept": {"application/platformsso-key-response+jwt"},
-			},
-			want: tokenAcceptKeyResponse,
-			ok:   true,
+			name:   "fallback jwt",
+			header: "application/jwt",
+			want:   true,
 		},
 		{
-			name: "explicit login response",
-			header: http.Header{
-				"Accept": {"application/platformsso-login-response+jwt"},
-			},
-			want: tokenAcceptLoginResponse,
-			ok:   true,
+			name:   "weighted list",
+			header: "application/json;q=0.8, application/platformsso-login-response+jwt;q=0.5",
+			want:   true,
 		},
 		{
-			name: "wildcard fallback",
-			header: http.Header{
-				"Accept": {"*/*"},
-			},
-			want: tokenAcceptLoginResponse,
-			ok:   true,
+			name:   "unsupported",
+			header: "application/json",
+			want:   false,
 		},
 		{
-			name: "weighted values",
-			header: http.Header{
-				"Accept": {"application/json;q=0.8, application/platformsso-key-response+jwt;q=0.5"},
-			},
-			want: tokenAcceptKeyResponse,
-			ok:   true,
-		},
-		{
-			name: "unsupported type",
-			header: http.Header{
-				"Accept": {"application/json"},
-			},
-			ok: false,
-		},
-		{
-			name: "multiple headers",
-			header: http.Header{
-				"Accept": {"application/json", "application/platformsso-login-response+jwt"},
-			},
-			want: tokenAcceptLoginResponse,
-			ok:   true,
+			name:   "empty",
+			header: "",
+			want:   false,
 		},
 	}
 
@@ -73,12 +41,8 @@ func TestNegotiateTokenContentType(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := negotiateTokenContentType(tt.header)
-			if ok != tt.ok {
-				t.Fatalf("expected ok=%v got %v", tt.ok, ok)
-			}
-			if ok && got != tt.want {
-				t.Fatalf("expected %q got %q", tt.want, got)
+			if got := acceptsPSSOResponse(tt.header); got != tt.want {
+				t.Fatalf("expected %v got %v", tt.want, got)
 			}
 		})
 	}
