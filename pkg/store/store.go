@@ -39,6 +39,8 @@ type Nonce struct {
 	DeviceID  string    `json:"device_id,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
+	Used      bool      `json:"used"`
+	UsedAt    time.Time `json:"used_at,omitempty"`
 }
 
 type Store interface {
@@ -126,15 +128,9 @@ func (s *FSStore) SaveNonce(ctx context.Context, nonce Nonce) error {
 		return ErrNonceUsed
 	}
 	nonce.CreatedAt = time.Now().UTC()
-
-	data, err := json.MarshalIndent(nonce, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode nonce: %w", err)
-	}
-	if err := os.WriteFile(filename, data, 0o640); err != nil {
-		return fmt.Errorf("write nonce: %w", err)
-	}
-	return nil
+	nonce.Used = false
+	nonce.UsedAt = time.Time{}
+	return s.writeNonceLocked(filename, nonce)
 }
 
 func (s *FSStore) ConsumeNonce(ctx context.Context, value, deviceID string) (Nonce, error) {
@@ -159,6 +155,10 @@ func (s *FSStore) ConsumeNonce(ctx context.Context, value, deviceID string) (Non
 		return Nonce{}, fmt.Errorf("decode nonce: %w", err)
 	}
 
+	if stored.Used {
+		return Nonce{}, ErrNonceUsed
+	}
+
 	if !stored.ExpiresAt.IsZero() && time.Now().UTC().After(stored.ExpiresAt) {
 		_ = os.Remove(filename)
 		return Nonce{}, ErrNonceExpired
@@ -168,11 +168,24 @@ func (s *FSStore) ConsumeNonce(ctx context.Context, value, deviceID string) (Non
 		return Nonce{}, ErrNonceMismatch
 	}
 
-	if err := os.Remove(filename); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Nonce{}, fmt.Errorf("remove nonce: %w", err)
+	stored.Used = true
+	stored.UsedAt = time.Now().UTC()
+	if err := s.writeNonceLocked(filename, stored); err != nil {
+		return Nonce{}, err
 	}
 
 	return stored, nil
+}
+
+func (s *FSStore) writeNonceLocked(filename string, nonce Nonce) error {
+	data, err := json.MarshalIndent(nonce, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode nonce: %w", err)
+	}
+	if err := os.WriteFile(filename, data, 0o640); err != nil {
+		return fmt.Errorf("write nonce: %w", err)
+	}
+	return nil
 }
 
 func (s *FSStore) loadDevice(deviceID string) (Device, error) {

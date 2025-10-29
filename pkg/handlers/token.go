@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +20,37 @@ type TokenConfig struct {
 	PasswordGrantEnabled bool
 	Issuer               string
 	Audience             []string
+}
+
+const (
+	tokenAcceptKeyResponse   = "application/platformsso-key-response+jwt"
+	tokenAcceptLoginResponse = "application/platformsso-login-response+jwt"
+)
+
+func negotiateTokenContentType(header http.Header) (string, bool) {
+	accepts := header.Values("Accept")
+	if len(accepts) == 0 {
+		return tokenAcceptLoginResponse, true
+	}
+
+	for _, value := range accepts {
+		for _, part := range strings.Split(value, ",") {
+			mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(part))
+			if err != nil {
+				continue
+			}
+			switch strings.ToLower(mediaType) {
+			case tokenAcceptKeyResponse:
+				return tokenAcceptKeyResponse, true
+			case tokenAcceptLoginResponse:
+				return tokenAcceptLoginResponse, true
+			case "*/*", "application/*":
+				return tokenAcceptLoginResponse, true
+			}
+		}
+	}
+
+	return "", false
 }
 
 type tokenRequestClaims struct {
@@ -64,6 +96,11 @@ func Token(deps TokenDependencies) http.HandlerFunc {
 		}
 		if r.Method != http.MethodPost {
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		contentType, ok := negotiateTokenContentType(r.Header)
+		if !ok {
+			writeJSONError(w, http.StatusNotAcceptable, "requested response content type not supported")
 			return
 		}
 		if ct := r.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/x-www-form-urlencoded") {
@@ -238,7 +275,7 @@ func Token(deps TokenDependencies) http.HandlerFunc {
 
 		_, _ = deps.Store.UpsertDevice(r.Context(), device)
 
-		w.Header().Set("Content-Type", "application/platformsso-login-response+jwt")
+		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(encrypted))
 	}

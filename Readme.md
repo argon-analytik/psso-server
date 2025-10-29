@@ -26,6 +26,16 @@ Production-grade Platform SSO companion service for macOS. It exposes the well-k
 
 ---
 
+### Handshake headers & MIME types
+
+| Endpoint | Required request headers | Response content type |
+|----------|--------------------------|-----------------------|
+| `POST /nonce` | `Content-Type: application/json` when sending a payload.<br>`Accept: application/json` (default is also accepted). | `application/json` |
+| `POST /key` | `Content-Type: application/json`.<br>`Accept: application/json`. | `application/json` |
+| `POST /token` | `Content-Type: application/x-www-form-urlencoded`.<br>`Accept: application/platformsso-login-response+jwt` (preferred) or `application/platformsso-key-response+jwt`. Any other `Accept` value is rejected with `406 Not Acceptable`. | Matches the negotiated `Accept` header (`application/platformsso-login-response+jwt` by default, `application/platformsso-key-response+jwt` when explicitly requested). |
+
+---
+
 ## Security & JOSE
 
 - **Inbound** assertions are JWS signed with the device’s public key (ECDSA/RSA). Optional JWE wrapping is decrypted with the server encryption private key.
