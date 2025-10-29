@@ -3,56 +3,61 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io"
 	"net/http"
-	"path/filepath"
 	"time"
 
-	"github.com/argon-analytik/psso-server/pkg/constants"
-	"github.com/argon-analytik/psso-server/pkg/file"
+	"github.com/argon-analytik/psso-server/pkg/store"
 )
 
-type NonceResponse struct {
-	Nonce string
+type nonceRequest struct {
+	DeviceID string `json:"device_id,omitempty"`
+	UDID     string `json:"udid,omitempty"`
+	Serial   string `json:"serial_number,omitempty"`
 }
 
-func Nonce() http.HandlerFunc {
+type nonceResponse struct {
+	Nonce     string    `json:"nonce"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func Nonce(state store.Store, ttl time.Duration) http.HandlerFunc {
+	if ttl <= 0 {
+		ttl = 120 * time.Second
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("Request for /nonce")
-
-		nonceBytes := make([]byte, 32)
-		if _, err := rand.Read(nonceBytes); err != nil {
-			http.Error(w, "bad nonce request", http.StatusBadRequest)
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		encoded := base64.StdEncoding.EncodeToString(nonceBytes)
-		response := NonceResponse{
-			Nonce: encoded,
-		}
-		nonce := file.Nonce{
-			Nonce:    encoded,
-			Category: "nonce",
-			TTL:      int(time.Now().Unix()) + (5 * 60), // make nonce good for 5 mins
+		var req nonceRequest
+		if r.Body != nil {
+			defer r.Body.Close()
+			dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+			if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+				http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+				return
+			}
 		}
 
-		nonceString := hex.EncodeToString(nonceBytes) + ".json"
-		if err := file.Save(nonce, filepath.Join(constants.NoncePath, nonceString)); err != nil {
-			fmt.Println(err)
+		buf := make([]byte, 32)
+		if _, err := rand.Read(buf); err != nil {
+			http.Error(w, "failed to generate nonce", http.StatusInternalServerError)
+			return
+		}
+		nonce := base64.RawURLEncoding.EncodeToString(buf)
+		expires := time.Now().UTC().Add(ttl)
+
+		if err := state.SaveNonce(r.Context(), store.Nonce{Value: nonce, DeviceID: req.DeviceID, ExpiresAt: expires}); err != nil {
 			http.Error(w, "failed to persist nonce", http.StatusInternalServerError)
-			return
-		}
-
-		payload, err := json.Marshal(response)
-		if err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(payload)
+		_ = json.NewEncoder(w).Encode(nonceResponse{Nonce: nonce, ExpiresAt: expires})
 	}
 }

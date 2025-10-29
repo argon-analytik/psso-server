@@ -1,56 +1,58 @@
 package constants
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
-/* ---------- Apple App‑Site‑Association (nur Beispiel‑IDs) ---------- */
-// AASAApps is computed from TEAM_ID and APP_BUNDLE_ID if provided.
-// Falls leer, bleiben Default-Beispiele erhalten.
-var AASAApps = [...]string{
-	getTeamAppID(),
+const (
+	GrantTypeJWTBearer = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+)
+
+var (
+	Address  = getEnv("PSSO_ADDRESS", ":9100")
+	TeamID   = getEnv("TEAM_ID", "QUR8QTGXNB")
+	BundleID = getEnv("APP_BUNDLE_ID", "ch.argio.psso")
+
+	JWKSPath    = filepath.FromSlash(getEnv("JWKS_PATH", "./dist/jwks.json"))
+	JWKSKeyBits = mustInt(getEnv("JWKS_KEY_BITS", "2048"))
+
+	ServerSigningKeyPath    = filepath.FromSlash(getEnv("SERVER_SIGNING_KEY_PRIV_PATH", "./secrets/server_signing_key.pem"))
+	ServerSigningKeyKID     = getEnv("SERVER_SIGNING_KEY_KID", "argio-ss1")
+	ServerEncryptionKeyPath = filepath.FromSlash(getEnv("SERVER_ENC_KEY_PRIV_PATH", ""))
+
+	StateDir   = filepath.FromSlash(getEnv("STATE_DIR", "./dist/state"))
+	NoncePath  = filepath.FromSlash(getEnv("NONCE_PATH", filepath.Join(StateDir, "nonces")))
+	DevicePath = filepath.FromSlash(getEnv("DEVICE_PATH", filepath.Join(StateDir, "devices")))
+
+	AuthentikBaseURL       = getEnv("AUTHENTIK_BASE_URL", "https://auth.argio.ch")
+	AuthentikTokenEndpoint = getEnv("AUTHENTIK_TOKEN_ENDPOINT", "https://auth.argio.ch/application/o/token/")
+	AKPasswordGrantEnabled = getEnvAsBool("AK_PASSWORD_GRANT_ENABLED", false)
+	AKClientID             = getEnv("AK_CLIENT_ID", "")
+	AKClientSecret         = getEnv("AK_CLIENT_SECRET", "")
+
+	DebugEnabled = getEnvAsBool("DEBUG", false)
+
+	EndpointJWKS           = "/.well-known/jwks.json"
+	EndpointAppleSiteAssoc = "/.well-known/apple-app-site-association"
+	EndpointHealthz        = "/healthz"
+	EndpointNonce          = "/nonce"
+	EndpointToken          = "/token"
+	EndpointKey            = "/key"
+)
+
+func AASAApps() []string {
+	team := strings.TrimSpace(TeamID)
+	bundle := strings.TrimSpace(BundleID)
+	if team == "" || bundle == "" {
+		return []string{"QUR8QTGXNB.ch.argio.psso"}
+	}
+	return []string{fmt.Sprintf("%s.%s", team, bundle)}
 }
 
-/* ---------- Umgebungs­variablen ---------- */
-var (
-	/* Basis */
-	Issuer   = getEnv("PSSO_ISSUER", "https://auth.argio.ch")
-	Audience = getEnv("PSSO_AUDIENCE", "macos")
-	Address  = getEnv("PSSO_ADDRESS", ":9100") // Listens inside Docker net
-
-	/* Datei‑/Pfad‑Konfiguration */
-	TLSPrivateKeyPath       = getEnv("PSSO_TLSPRIVATEKEYPATH", filepath.FromSlash("/etc/psso/privkey.pem"))
-	TLSCertificateChainPath = getEnv("PSSO_TLSCERTIFICATECHAINPATH", filepath.FromSlash("/etc/psso/fullchain.pem"))
-	JWKSFilepath            = getEnv("PSSO_JWKSFILEPATH", filepath.FromSlash("/var/psso/jwks.json"))
-	DeviceFilePath          = getEnv("PSSO_DEVICEFILEPATH", filepath.FromSlash("/var/psso/devices"))
-	NoncePath               = getEnv("PSSO_NONCEPATH", filepath.FromSlash("/var/psso/nonce"))
-	KeyPath                 = getEnv("PSSO_KEYPATH", filepath.FromSlash("/var/psso/keys"))
-
-	// New minimal env for AASA/JWKS
-	TeamID      = getEnv("TEAM_ID", "QUR8QTGXNB")
-	AppBundleID = getEnv("APP_BUNDLE_ID", "ch.argio.psso")
-	JWKSPath    = getEnv("JWKS_PATH", filepath.FromSlash("./dist/jwks.json"))
-	JWKSKeyBits = getEnv("JWKS_KEY_BITS", "2048")
-
-	/* Authentik Anbindung */
-	AuthentikBaseURL       = getEnv("AUTHENTIK_BASE_URL", "http://server:9000")
-	AuthentikTokenEndpoint = getEnv("AUTHENTIK_TOKEN_ENDPOINT", AuthentikBaseURL+"/application/o/token/")
-	AuthentikClientID      = getEnv("AUTHENTIK_CLIENT_ID", "psso-server")
-	AuthentikClientSecret  = getEnv("AUTHENTIK_CLIENT_SECRET", "")
-
-	AdminGroups = getEnv("PSSO_ADMIN_GROUPS", "argon_admins")
-
-	/* Öffentliche HTTP‑Routen */
-	EndpointJWKS           = getEnv("PSSO_ENDPOINTJWKS", "/.well-known/jwks.json")
-	EndpointAppleSiteAssoc = getEnv("PSSO_ENDPOINTAPPLESITEASSOC", "/.well-known/apple-app-site-association")
-	EndpointNonce          = getEnv("PSSO_ENDPOINTNONCE", "/nonce")
-	EndpointRegister       = getEnv("PSSO_ENDPOINTREGISTER", "/register")
-	EndpointToken          = getEnv("PSSO_ENDPOINTTOKEN", "/token")
-	EndpointHealthz        = getEnv("PSSO_ENDPOINTHEALTHZ", "/healthz")
-)
-
-/* ---------- Helfer ---------- */
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok && value != "" {
 		return value
@@ -58,11 +60,22 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func getTeamAppID() string {
-	team := getEnv("TEAM_ID", "QUR8QTGXNB")
-	app := getEnv("APP_BUNDLE_ID", "ch.argio.psso")
-	if team == "" || app == "" {
-		return ""
+func getEnvAsBool(key string, fallback bool) bool {
+	if value, ok := os.LookupEnv(key); ok && value != "" {
+		switch strings.ToLower(value) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off":
+			return false
+		}
 	}
-	return team + "." + app
+	return fallback
+}
+
+func mustInt(value string) int {
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 2048
+	}
+	return n
 }

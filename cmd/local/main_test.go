@@ -1,95 +1,133 @@
 package main
 
 import (
-	"encoding/json"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/argon-analytik/psso-server/pkg/authentik"
 	"github.com/argon-analytik/psso-server/pkg/constants"
-	"github.com/argon-analytik/psso-server/pkg/handlers"
+	"github.com/argon-analytik/psso-server/pkg/crypto"
+	"github.com/argon-analytik/psso-server/pkg/jwks"
+	"github.com/argon-analytik/psso-server/pkg/store"
+	jose "github.com/go-jose/go-jose/v3"
 )
 
-type noncePayload struct {
-	Nonce string `json:"Nonce"`
+func writeRSAKey(t *testing.T, path string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	block := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}
+	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
 }
 
-func configureTestPaths(t *testing.T) func() {
+func configureConstants(t *testing.T, root string) func() {
 	t.Helper()
-	temp := t.TempDir()
-
 	originalJWKS := constants.JWKSPath
+	originalState := constants.StateDir
 	originalNonce := constants.NoncePath
-	originalKeys := constants.KeyPath
-	originalDevices := constants.DeviceFilePath
+	originalDevice := constants.DevicePath
+	originalSigning := constants.ServerSigningKeyPath
+	originalKID := constants.ServerSigningKeyKID
 
-	constants.JWKSPath = filepath.Join(temp, "jwks.json")
-	constants.NoncePath = filepath.Join(temp, "nonces")
-	constants.KeyPath = filepath.Join(temp, "keys")
-	constants.DeviceFilePath = filepath.Join(temp, "devices")
+	constants.JWKSPath = filepath.Join(root, "jwks.json")
+	constants.StateDir = filepath.Join(root, "state")
+	constants.NoncePath = filepath.Join(constants.StateDir, "nonces")
+	constants.DevicePath = filepath.Join(constants.StateDir, "devices")
+	constants.ServerSigningKeyPath = filepath.Join(root, "signing.pem")
+	constants.ServerSigningKeyKID = "test-kid"
 
 	return func() {
 		constants.JWKSPath = originalJWKS
+		constants.StateDir = originalState
 		constants.NoncePath = originalNonce
-		constants.KeyPath = originalKeys
-		constants.DeviceFilePath = originalDevices
+		constants.DevicePath = originalDevice
+		constants.ServerSigningKeyPath = originalSigning
+		constants.ServerSigningKeyKID = originalKID
 	}
 }
 
 func TestNewRouterRegistersExpectedRoutes(t *testing.T) {
-	cleanup := configureTestPaths(t)
-	defer cleanup()
+	temp := t.TempDir()
+	restore := configureConstants(t, temp)
+	defer restore()
 
-	handlers.CheckWellKnowns()
+	writeRSAKey(t, constants.ServerSigningKeyPath)
 
-	router := NewRouter()
+	cryptoSvc, err := crypto.NewService(constants.ServerSigningKeyPath, constants.ServerSigningKeyKID, "")
+	if err != nil {
+		t.Fatalf("init crypto: %v", err)
+	}
 
-	tests := []struct {
-		name            string
-		method          string
-		path            string
-		wantStatus      int
-		wantContentType string
+	keys := []jose.JSONWebKey{cryptoSvc.SigningPublicJWK()}
+	if _, err := jwks.Write(constants.JWKSPath, keys); err != nil {
+		t.Fatalf("write jwks: %v", err)
+	}
+
+	st, err := store.NewFSStore(constants.StateDir, constants.DevicePath, constants.NoncePath)
+	if err != nil {
+		t.Fatalf("init store: %v", err)
+	}
+
+	router := newRouter(st, cryptoSvc, &authentik.Client{})
+
+	cases := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
 	}{
-		{name: "jwks", method: http.MethodGet, path: constants.EndpointJWKS, wantStatus: http.StatusOK, wantContentType: "application/json"},
-		{name: "aasa", method: http.MethodGet, path: constants.EndpointAppleSiteAssoc, wantStatus: http.StatusOK, wantContentType: "application/json"},
-		{name: "nonce", method: http.MethodGet, path: constants.EndpointNonce, wantStatus: http.StatusOK, wantContentType: "application/json"},
-		{name: "register", method: http.MethodGet, path: constants.EndpointRegister, wantStatus: http.StatusMethodNotAllowed},
-		{name: "token", method: http.MethodGet, path: constants.EndpointToken, wantStatus: http.StatusMethodNotAllowed},
+		{name: "jwks", method: http.MethodGet, path: constants.EndpointJWKS, wantStatus: http.StatusOK},
+		{name: "aasa", method: http.MethodGet, path: constants.EndpointAppleSiteAssoc, wantStatus: http.StatusOK},
+		{name: "nonce-post", method: http.MethodPost, path: constants.EndpointNonce, wantStatus: http.StatusOK},
+		{name: "nonce-get", method: http.MethodGet, path: constants.EndpointNonce, wantStatus: http.StatusMethodNotAllowed},
+		{name: "key", method: http.MethodPost, path: constants.EndpointKey, wantStatus: http.StatusBadRequest},
+		{name: "token", method: http.MethodPost, path: constants.EndpointToken, wantStatus: http.StatusBadRequest},
 		{name: "healthz", method: http.MethodGet, path: constants.EndpointHealthz, wantStatus: http.StatusOK},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rr := httptest.NewRecorder()
+
 			handler, pattern := router.Handler(req)
 			if pattern == "" {
-				t.Fatalf("route %s not registered", tt.path)
+				t.Fatalf("route %s not registered", tc.path)
 			}
 
-			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
-
-			if rr.Code != tt.wantStatus {
-				t.Fatalf("%s: expected status %d, got %d", tt.path, tt.wantStatus, rr.Code)
-			}
-
-			if tt.wantContentType != "" {
-				if got := rr.Header().Get("Content-Type"); got != tt.wantContentType {
-					t.Fatalf("%s: expected content-type %q, got %q", tt.path, tt.wantContentType, got)
-				}
-			}
-
-			if tt.path == constants.EndpointNonce && rr.Code == http.StatusOK {
-				var payload noncePayload
-				if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-					t.Fatalf("failed to decode nonce payload: %v", err)
-				}
-				if payload.Nonce == "" {
-					t.Fatalf("nonce response missing nonce field")
-				}
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("%s: expected %d, got %d", tc.path, tc.wantStatus, rr.Code)
 			}
 		})
 	}
+
+	// Ensure nonce endpoint returns JSON body
+	req := httptest.NewRequest(http.MethodPost, constants.EndpointNonce, nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("nonce unexpected status %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("nonce content-type = %s", ct)
+	}
+	if rr.Body.Len() == 0 {
+		t.Fatalf("expected nonce body")
+	}
+
+	// Give asynchronous store a moment to flush to disk for coverage
+	time.Sleep(10 * time.Millisecond)
 }

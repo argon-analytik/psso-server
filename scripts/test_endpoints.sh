@@ -3,29 +3,35 @@ set -euo pipefail
 
 BASE="${1:-http://localhost:9100}"
 
-echo "==> GET $BASE/healthz"
+header() {
+  echo "==> $1"
+}
+
+header "GET $BASE/healthz"
 curl -fsS -o /dev/null -w 'status: %{http_code}\n' "$BASE/healthz"
 
-echo "==> GET $BASE/.well-known/apple-app-site-association"
+header "GET $BASE/.well-known/apple-app-site-association"
 curl -fsS -H 'Accept: application/json' "$BASE/.well-known/apple-app-site-association" | jq .
 
-echo "==> GET $BASE/.well-known/jwks.json"
+header "GET $BASE/.well-known/jwks.json"
 curl -fsS -H 'Accept: application/json' "$BASE/.well-known/jwks.json" | jq .
 
-echo "==> GET $BASE/nonce"
-if ! curl -fsS -H 'Accept: application/json' "$BASE/nonce" | jq .; then
-  echo "[warn] /nonce request failed – ensure PSSO_NONCEPATH is writable" >&2
-fi
+header "POST $BASE/nonce"
+curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' "$BASE/nonce" | jq .
 
-cat <<EOF
+cat <<'INFO'
+# Handshake endpoints (manual invocation)
+# 1. Register device keys
+curl -X POST "$BASE/key" \
+  -H 'Content-Type: application/json' \
+  --data '{"device_id":"<uuid>","signing_key_pem":"-----BEGIN PUBLIC KEY-----...","encryption_key_pem":"-----BEGIN PUBLIC KEY-----...","signing_key_id":"device-signing","encryption_key_id":"device-encryption","key_version":"v1"}'
 
-# Handshake POST examples (leave sample values in place until you have real data)
-curl -X POST "$BASE/register" \\
-  -H 'Content-Type: application/json' \\
-  --data '{"DeviceUUID":"<uuid>","DeviceSigningKey":"<pem>","DeviceEncryptionKey":"<pem>","SignKeyID":"<base64>","EncKeyID":"<base64>"}'
+# 2. Request nonce
+curl -X POST -H 'Content-Type: application/json' -d '{"device_id":"<uuid>"}' "$BASE/nonce"
 
-curl -X POST "$BASE/token" \\
-  -H 'Content-Type: application/x-www-form-urlencoded' \\
-  --data 'platform_sso_version=1.0&assertion=<JWT>'
-EOF
-
+# 3. Exchange token (provide JOSE-signed assertion)
+curl -X POST "$BASE/token" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H 'Accept: application/platformsso-login-response+jwt' \
+  --data 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=<SIGNED_JWT>'
+INFO
