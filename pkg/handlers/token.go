@@ -1,241 +1,251 @@
 package handlers
 
 import (
-	"crypto/ecdsa"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/argon-analytik/psso-server/cmd/authentik"
+	"github.com/argon-analytik/psso-server/pkg/authentik"
 	"github.com/argon-analytik/psso-server/pkg/constants"
-	"github.com/argon-analytik/psso-server/pkg/file"
-	"github.com/go-jose/go-jose/v3/jwt"
-	"github.com/twocanoes/psso-sdk-go/psso"
+	"github.com/argon-analytik/psso-server/pkg/crypto"
+	"github.com/argon-analytik/psso-server/pkg/store"
+	josejwt "github.com/go-jose/go-jose/v3/jwt"
 )
 
-func jwksPrivateKey() (*ecdsa.PrivateKey, error) {
-
-	jwks, err := file.GetJWKS()
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-	jwkPrivKey, err := jwks.PrivateKey()
-	if err != nil {
-		fmt.Printf("%v", err)
-		return nil, err
-	}
-
-	return jwkPrivKey, nil
-
+type TokenConfig struct {
+	PasswordGrantEnabled bool
+	Issuer               string
+	Audience             []string
 }
-func Token() http.HandlerFunc {
+
+type tokenRequestClaims struct {
+	josejwt.Claims
+	DeviceID             string `json:"device_id"`
+	Nonce                string `json:"nonce"`
+	AuthenticationMethod string `json:"authentication_method"`
+	Username             string `json:"username,omitempty"`
+	Password             string `json:"password,omitempty"`
+	KeyVersion           string `json:"key_version,omitempty"`
+}
+
+type tokenResponseClaims struct {
+	josejwt.Claims
+	DeviceID             string   `json:"device_id"`
+	Nonce                string   `json:"nonce"`
+	AuthenticationMethod string   `json:"authentication_method"`
+	IDToken              string   `json:"id_token"`
+	RefreshToken         string   `json:"refresh_token"`
+	PreferredUsername    string   `json:"preferred_username,omitempty"`
+	Name                 string   `json:"name,omitempty"`
+	Groups               []string `json:"groups,omitempty"`
+}
+
+type idTokenPreview struct {
+	PreferredUsername string   `json:"preferred_username"`
+	Name              string   `json:"name"`
+	Groups            []string `json:"groups"`
+}
+
+type TokenDependencies struct {
+	Store     store.Store
+	Crypto    *crypto.Service
+	Authentik *authentik.Client
+	Config    TokenConfig
+}
+
+func Token(deps TokenDependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("Request for /token")
-
-		//get keystore for service private key and key id.
-		jwks, err := file.GetJWKS()
-		if err != nil {
-			fmt.Println(err)
+		if deps.Store == nil || deps.Crypto == nil {
+			writeJSONError(w, http.StatusInternalServerError, "token handler not initialised")
 			return
 		}
-
-		//get the service private key for signing response.
-		servicePrivateKey, err := jwksPrivateKey()
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		// // Dump the request to see what we have here
-		// requestDump, err := httputil.DumpRequest(r, true)
-		// if err != nil {
-		// 	fmt.Println(err)
-		// 	return
-		// }
-		// log.Write(string(requestDump)).Debug()
-
-		//make sure we have a post since that is the only http verb allowed at this endpoint.
 		if r.Method != http.MethodPost {
-			fmt.Println("message not a POST")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "application/x-www-form-urlencoded") {
+			writeJSONError(w, http.StatusUnsupportedMediaType, "expected application/x-www-form-urlencoded")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid form payload")
+			return
+		}
+		if gt := r.PostFormValue("grant_type"); gt != constants.GrantTypeJWTBearer {
+			writeJSONError(w, http.StatusBadRequest, "unsupported grant_type")
+			return
+		}
+		assertion := r.PostFormValue("assertion")
+		if assertion == "" {
+			writeJSONError(w, http.StatusBadRequest, "assertion is required")
 			return
 		}
 
-		//The response for has the PSSO version and the token.
-		r.ParseForm()
-
-		// assertion or request?
-		requestJWTString := r.FormValue("assertion")
-
-		if requestJWTString == "" {
-			requestJWTString = r.FormValue("request")
-
-		}
-		//need to get the headers so we parse the JWT and pull out the key ID.
-		requestJWT, err := jwt.ParseSigned(requestJWTString)
-
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		//The key id from the request is used to look up the device so we can use the device keys.
-		kid := requestJWT.Headers[0].KeyID
-		if kid == "" {
-			return
-		}
-		var keyID file.KeyID
-
-		filePath, err := base64.StdEncoding.DecodeString(kid)
-
-		if err != nil {
-			fmt.Println(err)
-			return
-
-		}
-		keyIDData, err := file.ReadFile(filepath.Join(constants.KeyPath, hex.EncodeToString(filePath)+".json"))
-		if err != nil {
-			fmt.Println(err)
-
-			return
-
-		}
-		err = json.Unmarshal(keyIDData, &keyID)
-
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		if keyID.PEM == "" {
-			fmt.Println("bad conversion to key id")
-			return
-		}
-
-		// Pull out the device signing public key PEM and turn it into a key.
-		// the device public key is used to verify the signature of the request JWT.
-
-		deviceSigningPublicKey, err := psso.ECPublicKeyFromPEM(keyID.PEM)
-		if err != nil {
-			fmt.Println("invalid ECPublicKeyFromPEM")
-			return
-
-		}
-
-		deviceID := keyID.Device
-
-		var device file.Device
-
-		deviceData, err := file.ReadFile(filepath.Join(constants.DeviceFilePath, deviceID+".json"))
-
-		if err != nil {
-			fmt.Println("ReadFile error")
-			return
-
-		}
-
-		err = json.Unmarshal(deviceData, &device)
-
-		if err != nil {
-			fmt.Println("Unmarshal error")
-			return
-
-		}
-		if device.EncryptionKey == "" {
-			fmt.Println("Unable to get device encryption key")
-			return
-		}
-
-		deviceEncryptionKeyBytes := []byte(device.EncryptionKey)
-
-		deviceEncryptionKeyBlock, _ := pem.Decode(deviceEncryptionKeyBytes)
-		deviceEncryptionPublicKey, _ := x509.ParsePKIXPublicKey(deviceEncryptionKeyBlock.Bytes)
-
-		pssoVersion := r.FormValue("platform_sso_version")
-
-		var jweString string
-		// The version of PSSO is required to be known since the format of the claims is different depending on the version
-		// of PSSO.
-		if pssoVersion == "1.0" {
-
-			//verify the signature and get the claims for the user authentication.
-			userClaims, _, err := psso.VerifyJWTAndReturnUserClaims(requestJWTString, deviceSigningPublicKey)
-
+		payload := assertion
+		if strings.Count(assertion, ".") == 4 {
+			decrypted, err := deps.Crypto.Decrypt(assertion)
 			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			claimUsername := userClaims.Username
-			claimPassword := userClaims.Password
-
-			roles, err := authentik.VerifyAndFetchRoles(claimUsername, claimPassword)
-			if err != nil {
-				fmt.Println("invalid username or password")
-				return
-			}
-			shortName := strings.Split(claimUsername, "@")[0]
-			fullName := shortName
-
-			jweString, err = psso.CreateIDTokenResponse(constants.Issuer, *userClaims, shortName, fullName, roles, claimUsername, claimUsername, "refresh", servicePrivateKey, jwks.KID, deviceEncryptionPublicKey.(*ecdsa.PublicKey))
-			if err != nil {
-				fmt.Println("invalid jwe")
-				return
-			}
-
-		} else if pssoVersion == "2.0" {
-
-			fmt.Println("Message is v2")
-			keyRequestClaims, err := psso.VerifyJWTAndReturnKeyRequestClaims(requestJWTString, deviceSigningPublicKey)
-
-			if err != nil {
-				fmt.Println("invalid username or password")
-				return
-			}
-			fmt.Println("decrypting symmetric key.")
-			keyExchangePasswordData, err := base64.StdEncoding.DecodeString(device.KeyExchangeKey)
-
-			if err != nil {
-				fmt.Println(err)
-				return
-
-			}
-			if keyRequestClaims.RequestType == "key_request" {
-				fmt.Println("key_request")
-
-				jweString, err = psso.CreateKeyRequestResponseClaims(*keyRequestClaims, deviceEncryptionPublicKey.(*ecdsa.PublicKey), keyExchangePasswordData)
-				if err != nil {
-					fmt.Println(err)
+				if errors.Is(err, crypto.ErrNoDecryptionKey) {
+					writeJSONError(w, http.StatusBadRequest, "server cannot decrypt assertion: missing private key")
 					return
 				}
-
-			} else if keyRequestClaims.RequestType == "key_exchange" {
-
-				jweString, err = psso.CreateKeyExchangeResponseClaims(*keyRequestClaims, deviceEncryptionPublicKey.(*ecdsa.PublicKey), keyExchangePasswordData)
-
-				if err != nil {
-					fmt.Println(err)
-					return
-				}
-			} else {
-				fmt.Println("invalid request type")
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("failed to decrypt assertion: %v", err))
 				return
-
 			}
-		} else {
+			payload = decrypted
+		}
 
-			fmt.Println("invalid PSSO version")
+		signed, err := josejwt.ParseSigned(payload)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid signed assertion")
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/platformsso-login-response+jwt; charset=utf-8")
-		w.Write([]byte(jweString))
+		var preview tokenRequestClaims
+		if err := signed.UnsafeClaimsWithoutVerification(&preview); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "unable to inspect assertion claims")
+			return
+		}
+		if preview.DeviceID == "" {
+			writeJSONError(w, http.StatusBadRequest, "device_id missing in assertion")
+			return
+		}
 
+		device, err := deps.Store.GetDevice(r.Context(), preview.DeviceID)
+		if err != nil {
+			writeJSONError(w, http.StatusUnauthorized, "device not registered")
+			return
+		}
+
+		signingKey, err := crypto.ParsePublicKeyPEM(device.SigningKeyPEM)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to parse device signing key")
+			return
+		}
+
+		if headerKID := signed.Headers[0].KeyID; headerKID != "" && device.KeyVersion != "" && headerKID != device.KeyVersion {
+			writeJSONError(w, http.StatusUnauthorized, "device key version mismatch")
+			return
+		}
+
+		var claims tokenRequestClaims
+		if err := signed.Claims(signingKey, &claims); err != nil {
+			writeJSONError(w, http.StatusUnauthorized, "invalid assertion signature")
+			return
+		}
+
+		if err := claims.Validate(josejwt.Expected{Time: time.Now()}); err != nil {
+			writeJSONError(w, http.StatusUnauthorized, "assertion expired or not yet valid")
+			return
+		}
+		if claims.Nonce == "" {
+			writeJSONError(w, http.StatusBadRequest, "nonce missing in assertion")
+			return
+		}
+
+		if _, err := deps.Store.ConsumeNonce(r.Context(), claims.Nonce, claims.DeviceID); err != nil {
+			status := http.StatusUnauthorized
+			switch err {
+			case store.ErrNonceExpired:
+				status = http.StatusUnauthorized
+			case store.ErrNonceNotFound, store.ErrNonceMismatch:
+				status = http.StatusUnauthorized
+			}
+			writeJSONError(w, status, "nonce invalid or already used")
+			return
+		}
+
+		method := strings.ToLower(claims.AuthenticationMethod)
+		if method == "" {
+			method = "password"
+		}
+
+		var token authentik.TokenResponse
+		switch method {
+		case "password":
+			if !deps.Config.PasswordGrantEnabled {
+				writeJSONError(w, http.StatusBadRequest, "password grant is disabled")
+				return
+			}
+			if claims.Username == "" || claims.Password == "" {
+				writeJSONError(w, http.StatusBadRequest, "username and password required for password grant")
+				return
+			}
+			if deps.Authentik == nil {
+				writeJSONError(w, http.StatusInternalServerError, "authentik client not configured")
+				return
+			}
+			token, err = deps.Authentik.PasswordGrant(r.Context(), claims.Username, claims.Password)
+			if err != nil {
+				writeJSONError(w, http.StatusUnauthorized, fmt.Sprintf("authentik error: %v", err))
+				return
+			}
+		default:
+			writeJSONError(w, http.StatusBadRequest, "authentication_method not supported")
+			return
+		}
+
+		var previewID idTokenPreview
+		if parsedID, err := josejwt.ParseSigned(token.IDToken); err == nil {
+			_ = parsedID.UnsafeClaimsWithoutVerification(&previewID)
+		}
+		if previewID.PreferredUsername == "" {
+			previewID.PreferredUsername = claims.Username
+		}
+		response := tokenResponseClaims{
+			Claims: josejwt.Claims{
+				Issuer:   deps.Config.Issuer,
+				Subject:  claims.Username,
+				Audience: deps.Config.Audience,
+				IssuedAt: josejwt.NewNumericDate(time.Now().UTC()),
+				Expiry:   josejwt.NewNumericDate(time.Now().UTC().Add(5 * time.Minute)),
+				ID:       claims.Nonce,
+			},
+			DeviceID:             claims.DeviceID,
+			Nonce:                claims.Nonce,
+			AuthenticationMethod: claims.AuthenticationMethod,
+			IDToken:              token.IDToken,
+			RefreshToken:         token.RefreshToken,
+			PreferredUsername:    previewID.PreferredUsername,
+			Name:                 previewID.Name,
+			Groups:               previewID.Groups,
+		}
+
+		signedResponse, err := deps.Crypto.SignJWT(response)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to sign response")
+			return
+		}
+
+		encryptionKeyRaw, err := crypto.ParsePublicKeyPEM(device.EncryptionKeyPEM)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "invalid device encryption key")
+			return
+		}
+		encKid := device.EncryptionKeyID
+		if encKid == "" {
+			encKid = device.KeyVersion
+		}
+
+		encrypted, err := deps.Crypto.EncryptForDevice(signedResponse, encryptionKeyRaw, encKid)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to encrypt response: %v", err))
+			return
+		}
+
+		_, _ = deps.Store.UpsertDevice(r.Context(), device)
+
+		w.Header().Set("Content-Type", "application/platformsso-login-response+jwt")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(encrypted))
 	}
+}
+
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
